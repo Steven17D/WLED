@@ -96,7 +96,12 @@ constexpr size_t  WLED_MAX_USERMOD_PALETTES     = WLED_USERMOD_PALETTE_ID_BASE -
     #define WLED_PLATFORM_ID 4       // used in UI to distinguish ESP type in UI, needs a proper fix!
   #endif
   #define WLED_MAX_TIMERS 64                // maximum number of timers
-  #define WLED_MAX_DIGITAL_CHANNELS (WLED_MAX_RMT_CHANNELS + WLED_MAX_I2S_CHANNELS)
+  #if defined(WLED_ENABLE_C3_SHARED_RGBW) && defined(CONFIG_IDF_TARGET_ESP32C3)
+    // Logical RGBW outputs; the hardware RMT limit above remains two.
+    #define WLED_MAX_DIGITAL_CHANNELS 4
+  #else
+    #define WLED_MAX_DIGITAL_CHANNELS (WLED_MAX_RMT_CHANNELS + WLED_MAX_I2S_CHANNELS)
+  #endif
 #endif
 // WLED_MAX_BUSSES was used to define the size of busses[] array which is no longer needed
 // instead it will help determine max number of buses that can be defined at compile time

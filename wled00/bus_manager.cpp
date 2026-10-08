@@ -1410,9 +1410,15 @@ void BusManager::off() {
 
 void BusManager::show() {
   applyABL(); // apply brightness limit, updates _gMilliAmpsUsed
+  #if defined(WLED_ENABLE_C3_SHARED_RGBW) && defined(CONFIG_IDF_TARGET_ESP32C3)
+  C3SharedRgbwMethod::beginFrame();
+  #endif
   for (auto &bus : busses) {
     bus->show();
   }
+  #if defined(WLED_ENABLE_C3_SHARED_RGBW) && defined(CONFIG_IDF_TARGET_ESP32C3)
+  C3SharedRgbwMethod::endFrame();
+  #endif
 }
 
 void IRAM_ATTR BusManager::setPixelColor(unsigned pix, uint32_t c) {

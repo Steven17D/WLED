@@ -8,6 +8,7 @@
 	<script>
 		var maxD=1,maxI2S=0,maxRMT=0,maxA=1,chipID=0,maxM=4000,maxPB=2048,maxL=1664,maxCO=5,maxBT=4; //maximum bytes for LED allocation: 4kB for 8266, 32kB for 32
 		var hasPSRAM=false; // set from /json/info on page load
+		var c3SharedRgbw=false; // set only by the feature-enabled C3 firmware
 		var customStarts=false,startsDirty=[];
 		function off(n)    { gN(n).value = -1;}
 		// these functions correspond to C macros found in const.h
@@ -58,7 +59,8 @@
 			});	// If we set async false, file is loaded and executed, then next statement is processed
 			if (loc) d.Sf.action = getURL('/settings/leds');
 		}
-		function bLimits(c,p,m,l,o,di,r,i,a,n) {
+		function bLimits(c,p,m,l,o,di,r,i,a,n,s=0) {
+			c3SharedRgbw = !!s;
 			chipID = c;		// chip/platformID - 0 = ESP8266, 1 = C3, 2 = S2, 3 = S3, 4 = ESP32
 			maxPB = p;		// maxPB - max LEDs per bus
 			maxM  = m;		// maxM - max LED memory
@@ -274,6 +276,7 @@
 			let t = parseInt(d.Sf["LT"+n].value);
 			if (!isDig(t) || isD2P(t)) return true; // only digital non-2pin types need bus check
 			let drv = d.Sf["LD"+n]?.value | 0; // driver preference selection: 0=RMT, 1=I2S
+			if (c3SharedRgbw && (t!==30 || drv!==0 || usage.sharedUsed>maxD)) return false;
 			if (drv==1 && usage.I2SType!==null && t!==usage.I2SType) return false; // mismatched type in parallel I2S
 			if (drv==0 && usage.rmtUsed > maxRMT) return false; // too many RMT buses
 			if (drv==1 && usage.i2sUsed > maxI2S) return false; // too many I2S buses
@@ -475,6 +478,7 @@
 				chanuse.style.display = 'inline';
 				chanuse.style.color = '#ccc';
 				channelMsg.textContent = `Hardware channels used: RMT ${usage.rmtUsed}/${maxRMT}, I2S ${usage.i2sUsed}/${maxI2S}`;
+				if (c3SharedRgbw) channelMsg.textContent += `; RGBW outputs ${usage.sharedUsed}/${maxD}`;
 				if (usage.rmtUsed > maxRMT || usage.i2sUsed > maxI2S) {
 					chanuse.style.color = 'red';
 				}
@@ -887,7 +891,7 @@ Swap: <select id="xw${s}" name="XW${s}">
 		}
 		// calculate channel usage across all buses
 		function getDuse() {
-			let rmtUsed = 0, i2sUsed = 0;
+			let rmtUsed = 0, i2sUsed = 0, sharedUsed = 0;
 			let I2SType = null;
 			let I2Smem = 0; // DMA memory usage for I2S buses: 3x LED count for single I2S bus, 24x LED count for parallel I2S
 			let maxLEDs = 0; // max number of LEDs for DMA buffer calc
@@ -904,7 +908,8 @@ Swap: <select id="xw${s}" name="XW${s}">
 							maxLEDs = maxLEDs > ledCount ? maxLEDs : ledCount; // for parallel I2S the memory buffer is shared, largest bus determines total memory usage
 							if (!I2SType) I2SType = t; // first I2S bus determines allowed type for all subsequent I2S buses (parallel I2S limitation)
 						} else {
-							rmtUsed++;
+							if (c3SharedRgbw && t===30) sharedUsed++;
+							else rmtUsed++;
 						}
 					}
 				});
@@ -916,7 +921,8 @@ Swap: <select id="xw${s}" name="XW${s}">
 					I2Smem = Math.round(I2Smem / i2sUsed); // average memory per I2S bus (used for memory estimation), round to nearest integer to avoid float rounding errors
 				}
 			}
-			return { rmtUsed, i2sUsed, I2SType, I2Smem };
+			if (sharedUsed) rmtUsed++; // all shared RGBW buses use a single hardware worker
+			return { rmtUsed, i2sUsed, I2SType, I2Smem, sharedUsed };
 		}
 
 		// dynamically enforce bus type availability based on current usage
@@ -968,6 +974,9 @@ Swap: <select id="xw${s}" name="XW${s}">
 					}
 				}
 				// 2-pin digital buses limited to 2
+				if (c3SharedRgbw) sel.querySelectorAll('option[data-type="D"]').forEach(o => {
+					if (parseInt(o.value)!==30) o.disabled = true;
+				});
 				if (twopinB >= 2 && !isD2P(curType)) disable('option[data-type="2P"]');
 				// PWM analog types limited by pin count
 				disable(`option[data-type^="${'A'.repeat(maxA - analogB + (isPWM(curType)?numPins(curType):0) + 1)}"]`);
@@ -981,6 +990,7 @@ Swap: <select id="xw${s}" name="XW${s}">
 					i2sOpt.disabled = false;
 					if (curDriver === 0) {
 						if ((usage.i2sUsed >= maxI2S))	i2sOpt.disabled = true; // disable I2S selection on RMT buses if full
+						if (c3SharedRgbw && curType===30) return; // shared buses do not consume one channel each
 						RMTcount++;
 						if (RMTcount > maxRMT) {
 							rmtOpt.disabled = true; // disable RMT if now full (other logic disables digital types if both full)

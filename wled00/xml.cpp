@@ -347,6 +347,9 @@ void getSettingsJS(byte subPage, Print& settingsScript)
       WLED_MAX_ANALOG_CHANNELS,
       WLED_MAX_BUTTONS
     );
+    #if defined(WLED_ENABLE_C3_SHARED_RGBW) && defined(CONFIG_IDF_TARGET_ESP32C3)
+    settingsScript.print(F("c3SharedRgbw=true;"));
+    #endif
 
     printSetFormCheckbox(settingsScript,PSTR("MS"),strip.autoSegments);
     printSetFormCheckbox(settingsScript,PSTR("CCT"),strip.correctWB);
