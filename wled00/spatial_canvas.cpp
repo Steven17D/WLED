@@ -385,8 +385,9 @@ void spatialCanvasWriteState(JsonObject root) {
     const Segment &seg = strip.getSegment(canvas.enabled ? i + 1 : i);
     path["name"] = seg.name ? seg.name : (canvas.normal[i].name[0] ? canvas.normal[i].name : defaultNames[i]);
     JsonArray a = path.createNestedArray("a"), b = path.createNestedArray("b");
-    a.add(canvas.paths[i].a.x); a.add(canvas.paths[i].a.y);
-    b.add(canvas.paths[i].b.x); b.add(canvas.paths[i].b.y);
+    // Fixed decimal output avoids ArduinoJson float formatting losing one last digit.
+    a.add(serialized(String(canvas.paths[i].a.x, 6))); a.add(serialized(String(canvas.paths[i].a.y, 6)));
+    b.add(serialized(String(canvas.paths[i].b.x, 6))); b.add(serialized(String(canvas.paths[i].b.y, 6)));
     path["reverse"] = canvas.paths[i].reverse;
   }
 }
