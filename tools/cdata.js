@@ -453,6 +453,12 @@ const char PAGE_dmxmap[] PROGMEM = R"=====()=====";
       filter: "html-minify",
     },
     {
+      file: "canvas.htm",
+      name: "PAGE_canvas",
+      method: "gzip",
+      filter: "html-minify",
+    },
+    {
       file: "liveview.htm",
       name: "PAGE_liveview",
       method: "gzip",

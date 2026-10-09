@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>WLED Strip Canvas</title>
+	<script src="common.js"></script>
+	<style>
+		:root {color-scheme:dark;font:14px system-ui,sans-serif;background:#111317;color:#e9edf5}
+		body {margin:0;padding:22px;max-width:1240px;margin-inline:auto}
+		button,select,input {font:inherit;color:inherit;background:#252a33;border:1px solid #454c59;border-radius:7px;padding:8px}
+		button {cursor:pointer} button:disabled {opacity:.4;cursor:default} input[type=range] {padding:0;min-width:0;width:100%}
+		input[type=number] {width:65px} input[type=checkbox] {accent-color:#ffb446}
+		header {display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+		h1 {font-size:20px;margin:0} .spacer {flex:1} a {color:#ffb446;text-decoration:none}
+		main {display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:22px}
+		#plane {width:100%;aspect-ratio:1.6;background:#090b10;border-radius:12px;border:1px solid #3b424e;touch-action:none;display:block}
+		aside {background:#1a1e25;padding:16px;border:1px solid #303744;border-radius:12px}
+		label {display:block;margin:12px 0} label.inline {display:inline-flex;align-items:center;gap:7px;margin:0}
+		.row {display:flex;align-items:center;justify-content:space-between;gap:10px}
+		.muted {color:#aab2c0;font-size:12px;line-height:1.5} .notice {min-height:20px;padding:8px 0;color:#ffce78}
+		#strips {display:grid;gap:6px;margin:12px 0} #strips button {text-align:left;background:#20252e} #strips button.selected {border-color:#ffb446}
+		#slices {display:grid;gap:9px;margin-top:18px} .slice {display:grid;grid-template-columns:105px 1fr;align-items:center;gap:12px;font-size:12px}
+		.slice canvas {width:100%;height:14px;border-radius:4px;background:#05070a}
+		select {max-width:100%;width:100%} .controls {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:18px}
+		.controls label {margin:0} .point {display:grid;grid-template-columns:1fr 1fr;gap:7px}
+		#save {background:#be7421;color:white;border-color:#ec9e40} footer {margin-top:20px;display:flex;align-items:center;gap:15px;flex-wrap:wrap}
+		@media(max-width:760px) {body{padding:14px} main{grid-template-columns:1fr} aside{display:grid;grid-template-columns:1fr 1fr;gap:12px} aside>section{min-width:0}}
+		@media(max-width:440px) {aside{display:block} .controls{grid-template-columns:1fr}}
+	</style>
+</head>
+<body>
+	<header><a href="/">← WLED</a><h1>Strip canvas</h1><span class="spacer"></span><label class="inline"><input type="checkbox" id="enabled">Use canvas</label><button id="save" disabled>Save layout</button></header>
+	<div id="status" class="notice" role="status">Connecting to WLED…</div>
+	<main>
+		<section>
+			<canvas id="plane" width="960" height="600" aria-label="Strip layout canvas"></canvas>
+			<p class="muted">Drag a strip to move it. Drag its endpoints to rotate or resize. Positions are suggestions until you arrange them. Slice previews show the sampled scene; strips using their own WLED effects keep those effects.</p>
+			<div id="slices"></div>
+			<div class="controls">
+				<label>2D effect<select id="effect"></select></label>
+				<label>Palette<select id="palette"></select></label>
+				<label>Speed<input id="speed" type="range" min="0" max="255"></label>
+				<label>Intensity<input id="intensity" type="range" min="0" max="255"></label>
+				<label>Custom 1<input id="custom1" type="range" min="0" max="255"></label>
+				<label>Custom 2<input id="custom2" type="range" min="0" max="255"></label>
+				<label>Custom 3<input id="custom3" type="range" min="0" max="31"></label>
+				<div><label class="inline"><input id="check1" type="checkbox">Option 1</label> <label class="inline"><input id="check2" type="checkbox">Option 2</label> <label class="inline"><input id="check3" type="checkbox">Option 3</label></div>
+			</div>
+		</section>
+		<aside>
+			<section><strong>STRIPS</strong><div id="strips"></div><div id="inspector">
+				<strong id="selectedName"></strong>
+				<label>First endpoint<div class="point"><input id="ax" type="number" min="0" max="1" step=".01" aria-label="First endpoint X"><input id="ay" type="number" min="0" max="1" step=".01" aria-label="First endpoint Y"></div></label>
+				<label>Last endpoint<div class="point"><input id="bx" type="number" min="0" max="1" step=".01" aria-label="Last endpoint X"><input id="by" type="number" min="0" max="1" step=".01" aria-label="Last endpoint Y"></div></label>
+				<label><input id="reverse" type="checkbox">Reverse LED order</label>
+				<button id="rotate">Rotate 90°</button>
+			</div></section>
+			<section><label>Scene resolution<select id="resolution"><option value="32">32 × 20</option><option value="48">48 × 30</option><option value="64">64 × 40</option></select></label>
+				<label><input id="power" type="checkbox">WLED power</label><label>Brightness<input id="brightness" type="range" min="1" max="255"></label>
+				<label><input id="boost" type="checkbox" checked>Boost dim preview</label>
+				<p class="muted">The Scene segment runs WLED's effect. Each strip can use Canvas Slice or its own effect in the WLED controls. Pulsar streaming temporarily takes over the physical outputs.</p>
+			</section>
+		</aside>
+	</main>
+	<footer><button id="reset">Reset positions</button><span class="muted" id="saved">No changes saved yet</span></footer>
+	<script>
+	// AI: below section was generated by an AI
+	// Uses WLED's existing JSON state and binary live-view protocol; no frame streaming.
+	const byId = id => document.getElementById(id);
+	const plane = byId('plane'), context = plane.getContext('2d');
+	let state, layout, selected = 0, dirty = false, saving = false, drag, socket, pixels = [], frameWidth = 0, frameHeight = 0, connected = false, fxDescriptions = [];
+	const colors = ['#ffb446','#82e3a5','#77bfff','#dc9aff'];
+	const defaults = [[[.14,.12],[.86,.12]],[[.10,.85],[.90,.85]],[[.29,.26],[.29,.67]],[[.71,.26],[.71,.67]]];
+	function controls(enabled) {document.querySelectorAll('button,input,select').forEach(control=>control.disabled=!enabled);}
+	controls(false);
+	const clamp = v => Math.max(0,Math.min(1,v));
+	function status(text) {byId('status').textContent = text;}
+	function changed() {dirty=true;byId('saved').textContent='Unsaved changes';byId('save').disabled=!connected;}
+	async function api(path, body) {
+		const response = await fetch(getURL(path), body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
+		if (!response.ok) throw new Error(`WLED request failed (${response.status})`);
+		return response.json();
+	}
+	function option(select, value, label) {const item=document.createElement('option');item.value=value;item.textContent=label;select.appendChild(item);}
+	function inspector() {
+		const path=layout.strips[selected];
+		byId('selectedName').textContent=path.name;
+		for (const key of ['ax','ay','bx','by']) byId(key).value=path[key[0]][key[1]==='x'?0:1].toFixed(3);
+		byId('reverse').checked=path.reverse;
+		[...byId('strips').children].forEach((button,i)=>button.classList.toggle('selected',i===selected));
+	}
+	function rows() {
+		byId('strips').replaceChildren();byId('slices').replaceChildren();
+		layout.strips.forEach((path,i)=>{
+			const button=document.createElement('button');button.textContent=`${path.name} · ${path.len} LEDs`;button.onclick=()=>{selected=i;inspector();};byId('strips').appendChild(button);
+			const row=document.createElement('div');row.className='slice';const label=document.createElement('span');label.textContent=path.name;row.appendChild(label);
+			const canvas=document.createElement('canvas');canvas.width=path.len;canvas.height=14;row.appendChild(canvas);byId('slices').appendChild(row);
+		});inspector();
+	}
+	function parameterLabels() {
+		const labels=(fxDescriptions[Number(byId('effect').value)]||'').split(';')[0].split(',');
+		['speed','intensity','custom1','custom2','custom3','check1','check2','check3'].forEach((id,index)=>{
+			const control=byId(id),label=control.parentElement,description=labels[index]||'';
+			label.style.display=description?'':'none';
+			if(description&&description!=='!') {
+				if(control.type==='checkbox')label.lastChild.nodeValue=' '+description;
+				else label.firstChild.nodeValue=description;
+			}
+		});
+	}
+	function receive(next) {
+		if (!next.canvas || next.canvas.strips.length!==4) throw new Error('This controller does not report four canvas strips');
+		state=next;layout=structuredClone(next.canvas);
+		byId('enabled').checked=layout.enabled;byId('resolution').value=layout.width;
+		byId('power').checked=state.on;byId('brightness').value=state.bri||8;
+		const scene=layout.enabled?state.seg.find(seg=>seg.id===layout.scene):null;
+		byId('effect').value=scene?.fx??114;byId('palette').value=scene?.pal??0;
+		for (const [id,key,fallback] of [['speed','sx',128],['intensity','ix',128],['custom1','c1',128],['custom2','c2',128],['custom3','c3',16]]) byId(id).value=scene?.[key]??fallback;
+		for (let i=1;i<=3;i++) byId(`check${i}`).checked=scene?.[`o${i}`]??false;
+		rows();parameterLabels();dirty=false;connected=true;controls(true);
+		status(layout.enabled?'Scene runs on the controller · layout saved':'Canvas is off · physical strip controls remain active');
+	}
+	async function save() {
+		if (!connected) return;
+		saving=true;controls(false);status('Saving on WLED…');
+		try {
+			const width=Number(byId('resolution').value),enabled=byId('enabled').checked;
+			const body={canvas:{enabled,width,height:width*5/8,strips:layout.strips.map(path=>({pin:path.pin,a:path.a,b:path.b,reverse:path.reverse}))},on:byId('power').checked,bri:Number(byId('brightness').value),transition:0};
+			if(enabled) body.seg=[{id:0,fx:Number(byId('effect').value),pal:Number(byId('palette').value),sx:Number(byId('speed').value),ix:Number(byId('intensity').value),c1:Number(byId('custom1').value),c2:Number(byId('custom2').value),c3:Number(byId('custom3').value),o1:byId('check1').checked,o2:byId('check2').checked,o3:byId('check3').checked}];
+			await api('/json/state',body);
+			for(let attempt=0;attempt<20;attempt++) {
+				await new Promise(resolve=>setTimeout(resolve,150));const next=await api('/json/state');
+				if(next.canvas.error) throw new Error(['','Invalid layout','Not enough memory','Output layout unavailable','Controller busy'][next.canvas.error]||'Canvas update rejected');
+				if(next.canvas.pending) continue;
+				if(next.canvas.enabled!==enabled||next.canvas.width!==width) throw new Error('Controller did not apply the requested layout');
+				saving=false;receive(next);byId('saved').textContent='Saved on controller';return;
+			}throw new Error('Canvas update timed out');
+		} catch(error) {saving=false;status(error.message);controls(connected);}
+	}
+	function sample(point) {
+		if(!pixels.length||!frameWidth||!frameHeight) return [0,0,0];
+		const x=clamp(point[0])*(frameWidth-1),y=clamp(point[1])*(frameHeight-1),x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(x0+1,frameWidth-1),y1=Math.min(y0+1,frameHeight-1),dx=x-x0,dy=y-y0;
+		const indices=[x0+y0*frameWidth,x1+y0*frameWidth,x0+y1*frameWidth,x1+y1*frameWidth];
+		const boost=byId('boost').checked?Math.min(32,255/Math.max(1,state?.bri||8)):1;
+		return [0,1,2].map(channel=>Math.min(255,Math.round(((pixels[indices[0]][channel]*(1-dx)+pixels[indices[1]][channel]*dx)*(1-dy)+(pixels[indices[2]][channel]*(1-dx)+pixels[indices[3]][channel]*dx)*dy)*boost)));
+	}
+	function draw() {
+		context.clearRect(0,0,plane.width,plane.height);
+		if(layout) {
+			if(layout.enabled&&pixels.length) for(let y=0;y<frameHeight;y++) for(let x=0;x<frameWidth;x++) {context.fillStyle=`rgba(${sample([x/Math.max(1,frameWidth-1),y/Math.max(1,frameHeight-1)]).join(',')},.45)`;context.fillRect(x*plane.width/frameWidth,y*plane.height/frameHeight,plane.width/frameWidth+1,plane.height/frameHeight+1);}
+			layout.strips.forEach((path,index)=>{
+				const a=[path.a[0]*plane.width,path.a[1]*plane.height],b=[path.b[0]*plane.width,path.b[1]*plane.height];
+				context.lineWidth=index===selected?13:8;context.lineCap='round';context.strokeStyle=colors[index];context.beginPath();context.moveTo(...a);context.lineTo(...b);context.stroke();
+				context.font='15px system-ui';context.fillStyle='white';context.fillText(path.name,Math.min(a[0],b[0]),Math.min(a[1],b[1])-14);
+				for(const point of [a,b]) {context.beginPath();context.arc(...point,index===selected?9:5,0,Math.PI*2);context.fillStyle='#15191f';context.fill();context.strokeStyle=colors[index];context.lineWidth=2;context.stroke();}
+				const slice=byId('slices').children[index]?.querySelector('canvas');if(slice) {const ctx=slice.getContext('2d');for(let i=0;i<path.len;i++){let t=path.len>1?i/(path.len-1):.5;if(path.reverse)t=1-t;const point=[path.a[0]+t*(path.b[0]-path.a[0]),path.a[1]+t*(path.b[1]-path.a[1])];ctx.fillStyle=layout.enabled?`rgb(${sample(point).join(',')})`:'#15191f';ctx.fillRect(i,0,1,14);}}
+			});
+		}requestAnimationFrame(draw);
+	}
+	function position(event) {const rect=plane.getBoundingClientRect();return [(event.clientX-rect.left)/rect.width,(event.clientY-rect.top)/rect.height];}
+	function distance(point,a,b) {const dx=b[0]-a[0],dy=(b[1]-a[1])*.625,px=point[0]-a[0],py=(point[1]-a[1])*.625,t=Math.max(0,Math.min(1,(px*dx+py*dy)/(dx*dx+dy*dy||1)));return Math.hypot(px-t*dx,py-t*dy);}
+	plane.onpointerdown=event=>{
+		if(!layout)return;const point=position(event);let best={distance:.05};
+		layout.strips.forEach((path,index)=>{for(const handle of ['a','b']) {const d=Math.hypot(point[0]-path[handle][0],(point[1]-path[handle][1])*.625);if(d<best.distance)best={distance:d,index,handle};}const d=distance(point,path.a,path.b);if(d<best.distance&&!['a','b'].includes(best.handle))best={distance:d,index,handle:'move'};});
+		if(best.index===undefined)return;selected=best.index;drag={...best,point,path:structuredClone(layout.strips[selected])};plane.setPointerCapture(event.pointerId);inspector();
+	};
+	plane.onpointermove=event=>{
+		if(!drag)return;const point=position(event),path=layout.strips[drag.index];
+		if(drag.handle==='move') {let dx=point[0]-drag.point[0],dy=point[1]-drag.point[1];dx=Math.max(-Math.min(drag.path.a[0],drag.path.b[0]),Math.min(1-Math.max(drag.path.a[0],drag.path.b[0]),dx));dy=Math.max(-Math.min(drag.path.a[1],drag.path.b[1]),Math.min(1-Math.max(drag.path.a[1],drag.path.b[1]),dy));for(const handle of ['a','b'])path[handle]=[drag.path[handle][0]+dx,drag.path[handle][1]+dy];}
+		else path[drag.handle]=point.map(clamp);
+		changed();inspector();
+	};
+	plane.onpointerup=plane.onpointercancel=()=>{drag=null;};
+	for(const key of ['ax','ay','bx','by']) byId(key).onchange=()=>{const value=Number(byId(key).value);if(!Number.isFinite(value))return;layout.strips[selected][key[0]][key[1]==='x'?0:1]=clamp(value);changed();inspector();};
+	byId('reverse').onchange=()=>{layout.strips[selected].reverse=byId('reverse').checked;changed();};
+	byId('rotate').onclick=()=>{const path=layout.strips[selected],cx=(path.a[0]+path.b[0])/2,cy=(path.a[1]+path.b[1])/2,dx=(path.b[0]-path.a[0])/2,dy=(path.b[1]-path.a[1])*.625/2;path.a=[clamp(cx+dy),clamp(cy-dx/.625)];path.b=[clamp(cx-dy),clamp(cy+dx/.625)];changed();inspector();};
+	byId('reset').onclick=()=>{layout.strips.forEach((path,i)=>{path.a=[...defaults[i][0]];path.b=[...defaults[i][1]];path.reverse=false;});changed();inspector();};
+	byId('save').onclick=save;
+	for(const id of ['enabled','resolution','power','brightness','effect','palette','speed','intensity','custom1','custom2','custom3','check1','check2','check3'])byId(id).onchange=changed;
+	byId('effect').onchange=()=>{changed();parameterLabels();};
+	function connectPreview() {
+		const url=new URL(getURL('/ws'),location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+		socket=new WebSocket(url);socket.binaryType='arraybuffer';
+		socket.onopen=()=>socket.send(JSON.stringify({lv:true}));
+		socket.onmessage=event=>{if(typeof event.data==='string'){try{const next=JSON.parse(event.data),reported=next.state||next;if(reported.canvas&&!reported.canvas.pending&&!dirty&&!saving)receive(reported);}catch{}return;}const data=new Uint8Array(event.data);if(data.length<4||data[0]!==76||data[1]!==2)return;const width=data[2],height=data[3];if(!width||!height||width>64||height>40||data.length!==4+width*height*3)return;frameWidth=width;frameHeight=height;pixels=[];for(let i=4;i<data.length;i+=3)pixels.push([data[i],data[i+1],data[i+2]]);};
+		socket.onclose=()=>{pixels=[];setTimeout(connectPreview,3000);};socket.onerror=()=>socket.close();
+	}
+	async function init() {
+		try {
+			getLoc();const [next,effects,data,palettes]=await Promise.all(['/json/state','/json/effects','/json/fxdata','/json/palettes'].map(path=>api(path)));
+			fxDescriptions=data;effects.forEach((name,id)=>{const flags=(data[id]||'').split(';')[3]||'';if(flags.includes('2'))option(byId('effect'),id,`${name}${/[vf]/.test(flags)?' (audio)':''}`);});
+			palettes.forEach((name,id)=>option(byId('palette'),id,name));receive(next);connectPreview();draw();
+		} catch(error) {connected=false;byId('save').disabled=true;status(error.message);}
+	}
+	init();
+	// AI: end
+	</script>
+</body>
+</html>

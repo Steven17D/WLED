@@ -377,6 +377,9 @@ static bool deserializeSegment(JsonObject elem, byte it, byte presetId = 0)
 bool deserializeState(JsonObject root, byte callMode, byte presetId)
 {
   bool stateResponse = root[F("v")] | false;
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  if (spatialCanvasQueue(root, presetId)) return stateResponse;
+#endif
 
   #if defined(WLED_DEBUG) && defined(WLED_DEBUG_HOST)
   netDebugEnabled = root[F("debug")] | netDebugEnabled;
@@ -651,6 +654,9 @@ static void serializeSegment(JsonObject& root, const Segment& seg, byte id, bool
 
 void serializeState(JsonObject root, bool forPreset, bool includeBri, bool segmentBounds, bool selectedSegmentsOnly)
 {
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  spatialCanvasWriteState(root);
+#endif
   if (includeBri) {
     root["on"] = (bri > 0);
     root["bri"] = briLast;
@@ -710,6 +716,9 @@ void serializeState(JsonObject root, bool forPreset, bool includeBri, bool segme
 
 void serializeInfo(JsonObject root)
 {
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  spatialCanvasWriteInfo(root);
+#endif
   root[F("ver")] = versionString;
   root[F("vid")] = VERSION;
   root[F("cn")] = F(WLED_CODENAME);

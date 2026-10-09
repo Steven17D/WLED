@@ -103,6 +103,9 @@ void WLED::loop()
     yield();
   }
 
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  spatialCanvasLoop();
+#endif
   #ifdef WLED_DEBUG
   stripMillis = millis();
   #endif
@@ -599,6 +602,9 @@ void WLED::setup()
 
 void WLED::beginStrip()
 {
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  spatialCanvasRegisterEffect(); // stable effect ID whether canvas is enabled or disabled at boot
+#endif
   // Initialize NeoPixel Strip and button
   strip.setTransition(0); // temporarily prevent transitions to reduce segment copies
   strip.finalizeInit(); // busses created during deserializeConfig() if config existed

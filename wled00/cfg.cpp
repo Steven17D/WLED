@@ -764,6 +764,9 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
     needsSave = !UsermodManager::readFromConfig(usermods_settings);
   }
 
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  if (fromFS) spatialCanvasReadConfig(doc);
+#endif
   if (fromFS) return needsSave;
   // if from /json/cfg
   doReboot = doc[F("rb")] | doReboot;
@@ -1263,6 +1266,9 @@ void serializeConfig(JsonObject root) {
 
   JsonObject usermods_settings = root.createNestedObject("um");
   UsermodManager::addToConfig(usermods_settings);
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  spatialCanvasWriteConfig(root);
+#endif
 }
 
 

@@ -350,6 +350,12 @@ void initServer()
   });
   #endif
 #endif
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  server.on(F("/canvas/pixels"), HTTP_GET, spatialCanvasServePixels);
+  server.on(F("/canvas"), HTTP_GET, [](AsyncWebServerRequest *request) {
+    handleStaticContent(request, "", 200, FPSTR(CONTENT_TYPE_HTML), PAGE_canvas, PAGE_canvas_length);
+  });
+#endif
   server.on(F("/liveview"), HTTP_GET, [](AsyncWebServerRequest *request) {
     handleStaticContent(request, "", 200, FPSTR(CONTENT_TYPE_HTML), PAGE_liveview, PAGE_liveview_length);
   });

@@ -54,6 +54,8 @@
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #endif
 
+#include "spatial_canvas.h"
+
 extern bool realtimeRespectLedMaps; // used in getMappedPixelIndex()
 extern byte realtimeMode;           // used in getMappedPixelIndex()
 
@@ -942,6 +944,7 @@ class WS2812FX {
     inline uint8_t getModeCount() const     { return _modeCount; }        // returns number of registered modes/effects
 
     uint16_t getLengthPhysical() const;
+    bool tryPixelBuffer(unsigned length); // allocate replacement before releasing the current buffer
     uint16_t getLengthTotal() const; // will include virtual/nonexistent pixels in matrix
 
     inline uint16_t getFps() const          { return (millis() - _lastShow > 2000) ? 0 : (FPS_MULTIPLIER * _cumulativeFps) >> FPS_CALC_SHIFT; } // Returns the refresh rate of the LED strip (_cumulativeFps is stored in fixed point)
@@ -950,6 +953,9 @@ class WS2812FX {
     inline uint16_t getLength() const       { return _length; }           // returns actual amount of LEDs on a strip (2D matrix may have less LEDs than W*H)
     inline uint16_t getTransition() const   { return _transitionDur; }    // returns currently set transition time (in ms)
     inline uint16_t getMappedPixelIndex(uint16_t index) const {           // convert logical address to physical
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+      if (spatialCanvasEnabled() && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps)) return spatialCanvasMap(index);
+#endif
       if (index < customMappingSize && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps)) index = customMappingTable[index];
       return index;
     };

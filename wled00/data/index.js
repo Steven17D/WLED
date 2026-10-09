@@ -1463,6 +1463,7 @@ function makeWS() {
 
 function readState(s,command=false)
 {
+	if (gId("buttonCanvas")) gId("buttonCanvas").style.display = s.canvas ? "" : "none";
 	if (!s) return false;
 	if (s.success) return true; // no data to process
 
