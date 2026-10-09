@@ -370,7 +370,8 @@ void spatialCanvasServePixels(AsyncWebServerRequest *request) {
   if (from < 0 || unsigned(from) >= length || count < 1 || count > 64 || (scene && !canvas.enabled)) {
     request->send(400, CONTENT_TYPE_JSON, F("{\"error\":\"range\"}")); return;
   }
-  if (strip.isServicing() || !requestJSONBufferLock(JSON_LOCK_SERVEJSON)) { request->deferResponse(); return; }
+  if (strip.isServicing()) { request->send(503, CONTENT_TYPE_JSON, F("{\"error\":\"busy\"}")); return; }
+  if (!requestJSONBufferLock(JSON_LOCK_SERVEJSON)) { request->deferResponse(); return; }
   uint32_t frame = strip.getLastShow();
   count = min(unsigned(count), length - unsigned(from));
   AsyncJsonResponse *response = new AsyncJsonResponse(JSON_ARRAY_SIZE(128) + JSON_OBJECT_SIZE(6), false);
@@ -390,7 +391,7 @@ void spatialCanvasServePixels(AsyncWebServerRequest *request) {
   if (strip.isServicing() || frame != strip.getLastShow()) {
     delete response;
     releaseJSONBufferLock();
-    request->deferResponse(); return;
+    request->send(503, CONTENT_TYPE_JSON, F("{\"error\":\"busy\"}")); return;
   }
   response->setLength();
   releaseJSONBufferLock();
