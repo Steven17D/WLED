@@ -117,3 +117,26 @@ canvas offsets. Preserve protected `wsec.json`, bootloader and partition table.
 Reference: [WLED mapping](https://kno.wled.ge/advanced/mapping/),
 [WLED segments](https://kno.wled.ge/features/segments/), and the pinned
 `FX_fcn.cpp`, `FX_2Dfcn.cpp` and `usermods/user_fx` sources at WLED 16.0.1.
+
+## Blank canvas on effect-metadata parse failure
+
+The editor could stop initialization with `Expected ',' or ']' after array
+element in JSON` because the existing `/json/fxdata` chunk callback required a
+whole effect record to fit. When an outbound buffer was smaller than the next
+record, it returned zero, which AsyncWebServer interpreted as the end of the
+response. The resulting JSON array was truncated. Live browser reloads reproduced
+this at different offsets, including 5519; Steven reported offset 8308.
+
+The callback now keeps a per-response record offset and copies partial escaped
+records into arbitrary buffer capacities. A bounded stack buffer holds one
+record; no whole-response allocation or per-chunk heap allocation is added.
+Returning zero is reserved for completion of the array.
+
+An extracted-source host regression failed before the fix and passed afterward
+under AddressSanitizer/UndefinedBehaviorSanitizer at callback capacities
+1/2/3/7/31/64/128/1460 bytes, including escaped text and buffer guards. Both
+firmware targets and all 19 Node tests passed. The fix was uploaded over Wi-Fi;
+20 consecutive live browser loads populated all four strips with no malformed
+JSON or JavaScript errors. Scene, layout, configuration and presets were restored
+and checked against fresh pre-update snapshots. These fix-specific checks are
+separate from the earlier ten-minute canvas/driver qualification above.
