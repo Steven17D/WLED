@@ -370,11 +370,12 @@ void spatialCanvasServePixels(AsyncWebServerRequest *request) {
   if (from < 0 || unsigned(from) >= length || count < 1 || count > 64 || (scene && !canvas.enabled)) {
     request->send(400, CONTENT_TYPE_JSON, F("{\"error\":\"range\"}")); return;
   }
-  if (!requestJSONBufferLock(JSON_LOCK_SERVEJSON)) { request->deferResponse(); return; }
+  if (strip.isServicing() || !requestJSONBufferLock(JSON_LOCK_SERVEJSON)) { request->deferResponse(); return; }
+  uint32_t frame = strip.getLastShow();
   count = min(unsigned(count), length - unsigned(from));
   AsyncJsonResponse *response = new AsyncJsonResponse(JSON_ARRAY_SIZE(128) + JSON_OBJECT_SIZE(6), false);
   JsonObject root = response->getRoot();
-  root["from"] = from; root["count"] = count; root["frame"] = strip.getLastShow();
+  root["from"] = from; root["count"] = count; root["frame"] = frame;
   JsonArray values = root.createNestedArray("pixels");
   JsonArray composed = root.createNestedArray("composed");
   for (int i = from; i < from + count; i++) {
@@ -384,6 +385,12 @@ void spatialCanvasServePixels(AsyncWebServerRequest *request) {
       unsigned logical = canvas.enabled && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps) ? spatialCanvasOffset() + i : i;
       composed.add(strip.getPixelColorNoMap(logical));
     }
+  }
+  // Discard a read overlapping composition rather than exposing a partial frame.
+  if (strip.isServicing() || frame != strip.getLastShow()) {
+    delete response;
+    releaseJSONBufferLock();
+    request->deferResponse(); return;
   }
   response->setLength();
   releaseJSONBufferLock();
