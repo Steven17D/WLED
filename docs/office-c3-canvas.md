@@ -19,9 +19,10 @@ are IDs 1..4, at logical starts 640/759/877/908. WLED's reported logical pixel
 count becomes 939; `/json/info.canvas.physicalCount` remains 299. The canvas
 state also advertises physical GPIO/range descriptors and the logical offset.
 Pulsar must use those descriptors for names, and keep physical DDP offsets
-0/476/948/1072 bytes. Realtime DDP always retains physical addressing, including when the existing
-respect-ledmaps setting is enabled. The virtual grid is internal scene storage,
-not a realtime LED map. DDP temporarily takes over the physical outputs; the device scene resumes afterward. The editor pauses its scene preview during
+0/476/948/1072 bytes. Realtime DDP always retains physical addressing, including
+when the existing respect-ledmaps setting is enabled. The virtual grid is internal scene storage,
+not a realtime LED map. DDP temporarily takes over the physical outputs; the
+device scene resumes afterward. The editor pauses its scene preview during
 physical realtime control so it does not misrepresent the host stream.
 
 A physical segment can select a different WLED effect, brightness or power
@@ -60,7 +61,7 @@ values. Coordinates use stable four-decimal state output. Save layout persists
 geometry; save a normal WLED preset to retain the complete scene/effect settings
 across startup.
 
-## Validation before deployment
+## Qualification on the Office controller
 
 - Web UI build and 19 Node build tests passed.
 - Custom C3 and standard `esp32dev` firmware compilation passed.
@@ -73,8 +74,39 @@ across startup.
 - `git diff --check` passed. Generated HTML headers and firmware are excluded
   from Git.
 
-Hardware canvas qualification, reboot/preset/DDP compatibility, sustained
-operation and rollback remain deployment gates until their results are recorded.
+- All 299 composed RGBW samples matched an independent bilinear sampler, including
+  a diagonal path and reversal; white-channel preservation passed.
+- All three editor resolutions preserved independent strip effects, brightness,
+  effect checkboxes and blend settings.
+- Existing ordinary presets exit canvas; new canvas presets restore it. A reboot
+  preserves geometry, four GPIO outputs and startup off. Temporary qualification
+  presets were removed and all original presets retained.
+- Physical RGBW DDP matched all 299 intended composed pixels with the existing
+  respect-ledmaps setting enabled. This regression failed on the preceding canvas
+  build (0 of 299 matches) and passed with the correction.
+- The actual device editor exposed all four names/counts and 62 native 2D choices
+  without JavaScript errors. All 62 effects passed the live API/driver sweep at
+  32x20; this does not qualify every effect at the maximum resolution or establish
+  an audio input. Lowest sampled free heap was 106760 bytes.
+- A full Wi-Fi downgrade to the previous qualified four-output image and return
+  to this image passed, retaining the physical configuration and restoring canvas.
+- Ten minutes alternating native scenes and physical RGBW DDP passed: 7242
+  streamed frames, no reset or driver errors, minimum sampled free heap 107852
+  bytes. Configuration and presets were unchanged during the test.
+- The actual editor paused during realtime ownership and resumed after streaming
+  with no JavaScript errors.
+- Pulsar debug/release builds and 41 direct production-code checks passed against
+  this device, including 90 dim frames and exact state/geometry restoration. Its
+  required full XCTest gate remains blocked by the CLT-only toolchain; the companion
+  update has not been installed. See the companion repo's AGENTS.md.
+
+These live checks qualify composed software output and driver telemetry. Earlier
+four-output driver qualification included physical observation; the new canvas
+has not received a new visual observation. Private firmware/config/preset backups
+and machine-readable qualification results are retained outside Git. Canvas is
+installed but disabled pending the companion installation gate; the original
+four named Rainbow segments are restored. The editor remains available at
+`http://office.local/canvas`.
 Keep the previous qualified image and fresh config/preset backups outside Git.
 Before reverting to firmware without this extension, disable canvas and verify
 the ordinary four segment ranges; the old firmware cannot interpret virtual
