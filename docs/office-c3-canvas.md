@@ -97,15 +97,17 @@ across startup.
   with no JavaScript errors.
 - Pulsar debug/release builds and 41 direct production-code checks passed against
   this device, including 90 dim frames and exact state/geometry restoration. Its
-  required full XCTest gate remains blocked by the CLT-only toolchain; the companion
-  update has not been installed. See the companion repo's AGENTS.md.
+  full XCTest remains unavailable in the CLT-only toolchain. Steven explicitly
+  waived that gate for this update; the stable-signed companion is installed.
+  The live installed-app UI check awaits unlocking the Mac.
 
 These live checks qualify composed software output and driver telemetry. Earlier
 four-output driver qualification included physical observation; the new canvas
 has not received a new visual observation. Private firmware/config/preset backups
-and machine-readable qualification results are retained outside Git. Canvas is
-installed but disabled pending the companion installation gate; the original
-four named Rainbow segments are restored. The editor remains available at
+and machine-readable qualification results are retained outside Git. The companion
+update is installed under an explicit one-change XCTest waiver. Canvas is enabled
+at dim brightness with Scene Rotozoomer and all four physical strips sampling
+their paths; Pulsar Output remains off. The editor is available at
 `http://office.local/canvas`.
 Keep the previous qualified image and fresh config/preset backups outside Git.
 Before reverting to firmware without this extension, disable canvas and verify
