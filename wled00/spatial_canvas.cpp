@@ -25,7 +25,7 @@ struct CanvasConfig {
   Look normal[4];
 };
 CanvasConfig canvas;
-StaticJsonDocument<6144> pendingDocument;
+StaticJsonDocument<12288> pendingDocument;
 bool pending = false, processing = false;
 uint8_t sliceEffect = 0, canvasError = 0;
 const char *defaultNames[4] = {"Light bar", "Desk", "Left monitor", "Right monitor"};
@@ -166,8 +166,15 @@ bool spatialCanvasQueue(JsonObject root, uint8_t presetId) {
   if (root.containsKey("canvas") && !parseConfig(root["canvas"].as<JsonObject>(), candidate, false)) {
     canvasError = 1; return true;
   }
+  // HTTP parsing borrows strings from a request buffer. Reparse immutable JSON
+  // so every queued key and value remains owned after that request is released.
+  size_t bytes = measureJson(root);
+  if (bytes > 8192) { canvasError = 1; return true; }
+  String serialized;
+  if (!serialized.reserve(bytes + 1)) { canvasError = 2; return true; }
+  serializeJson(root, serialized);
   pendingDocument.clear();
-  if (!pendingDocument.set(root) || pendingDocument.overflowed()) { canvasError = 1; pendingDocument.clear(); return true; }
+  if (deserializeJson(pendingDocument, serialized.c_str()) || pendingDocument.overflowed()) { canvasError = 1; pendingDocument.clear(); return true; }
   if (!root.containsKey("canvas")) pendingDocument["canvas"]["enabled"] = false;
   pending = true; canvasError = 0;
   return true;
