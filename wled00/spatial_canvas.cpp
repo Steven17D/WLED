@@ -144,6 +144,32 @@ void readLook(JsonObject object, Look &look) {
   for (unsigned j = 0; j < 3; j++) look.colors[j] = object["colors"][j] | look.colors[j];
 }
 
+// Deep-copy borrowed HTTP strings without serializing numbers through a lossy float format.
+// Depth matches ArduinoJson's bounded ingress nesting; allocation failure rejects the edit.
+bool copyOwnedJson(JsonVariant source, JsonVariant destination, unsigned depth = 0) {
+  if (depth > 10) return false;
+  if (source.is<JsonObject>()) {
+    JsonObject object = destination.to<JsonObject>();
+    if (object.isNull()) return false;
+    for (JsonPair pair : source.as<JsonObject>()) {
+      String key(pair.key().c_str());
+      if (key.length() != strlen(pair.key().c_str())) return false;
+      if (!copyOwnedJson(pair.value(), object[key], depth + 1)) return false;
+    }
+  } else if (source.is<JsonArray>()) {
+    JsonArray array = destination.to<JsonArray>();
+    if (array.isNull()) return false;
+    for (JsonVariant value : source.as<JsonArray>()) {
+      if (!array.add(nullptr) || !copyOwnedJson(value, array[array.size() - 1], depth + 1)) return false;
+    }
+  } else if (source.is<const char*>()) {
+    const char *text = source.as<const char*>();
+    String owned(text);
+    if (owned.length() != strlen(text) || !destination.set(owned)) return false;
+  } else if (!destination.set(source)) return false;
+  return true;
+}
+
 // A bounded queued replay preserves ordinary preset/state fields across topology changes.
 bool legacyBounds(JsonObject root) {
   if (!canvas.enabled || root.containsKey("canvas")) return false;
@@ -180,15 +206,12 @@ bool spatialCanvasQueue(JsonObject root, uint8_t presetId, uint8_t callMode) {
   if (root.containsKey("canvas") && !parseConfig(root["canvas"].as<JsonObject>(), candidate, false)) {
     canvasError = 1; return true;
   }
-  // HTTP parsing borrows strings from a request buffer. Reparse immutable JSON
-  // so every queued key and value remains owned after that request is released.
-  size_t bytes = measureJson(root);
-  if (bytes > 8192) { canvasError = 1; return true; }
-  String serialized;
-  if (!serialized.reserve(bytes + 1)) { canvasError = 2; return true; }
-  serializeJson(root, serialized);
+  // HTTP parsing borrows strings from a request buffer; queued edits own them.
+  if (measureJson(root) > 8192) { canvasError = 1; return true; }
   pendingDocument.clear();
-  if (deserializeJson(pendingDocument, serialized.c_str()) || pendingDocument.overflowed()) { canvasError = 1; pendingDocument.clear(); return true; }
+  if (!copyOwnedJson(root, pendingDocument.to<JsonVariant>()) || pendingDocument.overflowed()) {
+    canvasError = 2; pendingDocument.clear(); return true;
+  }
   if (!root.containsKey("canvas")) pendingDocument["canvas"]["enabled"] = false;
   pendingPresetId = presetId; pendingCallMode = callMode;
   pending = true; canvasError = 0;
