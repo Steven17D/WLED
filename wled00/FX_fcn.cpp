@@ -2019,14 +2019,18 @@ void WS2812FX::makeAutoSegments(bool forceReset) {
 
 void WS2812FX::fixInvalidSegments() {
   if (isServicing()) return;
+  unsigned segmentLimit = _length;
+#ifdef WLED_ENABLE_SPATIAL_CANVAS
+  if (spatialCanvasEnabled()) segmentLimit = getLengthTotal(); // trailing strips follow the virtual grid
+#endif
   //make sure no segment is longer than total (sanity check)
   for (size_t i = getSegmentsNum()-1; i > 0; i--) {
     if (isMatrix) {
     #ifndef WLED_DISABLE_2D
       if (_segments[i].start >= Segment::maxWidth * Segment::maxHeight) {
         // 1D segment at the end of matrix
-        if (_segments[i].start >= _length || _segments[i].startY > 0 || _segments[i].stopY > 1) { _segments.erase(_segments.begin()+i); continue; }
-        if (_segments[i].stop  >  _length) _segments[i].stop = _length;
+        if (_segments[i].start >= segmentLimit || _segments[i].startY > 0 || _segments[i].stopY > 1) { _segments.erase(_segments.begin()+i); continue; }
+        if (_segments[i].stop  >  segmentLimit) _segments[i].stop = segmentLimit;
         continue;
       }
       if (_segments[i].start >= Segment::maxWidth || _segments[i].startY >= Segment::maxHeight) { _segments.erase(_segments.begin()+i); continue; }
@@ -2034,8 +2038,8 @@ void WS2812FX::fixInvalidSegments() {
       if (_segments[i].stopY >  Segment::maxHeight) _segments[i].stopY = Segment::maxHeight;
     #endif
     } else {
-      if (_segments[i].start >= _length) { _segments.erase(_segments.begin()+i); continue; }
-      if (_segments[i].stop  >  _length) _segments[i].stop = _length;
+      if (_segments[i].start >= segmentLimit) { _segments.erase(_segments.begin()+i); continue; }
+      if (_segments[i].stop  >  segmentLimit) _segments[i].stop = segmentLimit;
     }
   }
   // if any segments were deleted free memory

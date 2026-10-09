@@ -209,6 +209,8 @@ void spatialCanvasSegments() {
     seg.selected = false;
     seg.on = true;
   }
+  // Constructors start with empty capabilities; publish RGBW controls immediately.
+  for (unsigned i = 0; i < strip.getSegmentsNum(); i++) strip.getSegment(i).refreshLightCapabilities();
   strip.setMainSegmentId(0);
 }
 
@@ -268,6 +270,7 @@ void spatialCanvasLoop() {
             Segment &seg = strip.getSegment(i);
             seg.setGeometry(bus->getStart(), bus->getStart() + bus->getLength());
             apply(canvas.normal[i], seg);
+            seg.refreshLightCapabilities();
           }
         }
       }
@@ -369,7 +372,7 @@ void spatialCanvasServePixels(AsyncWebServerRequest *request) {
   }
   if (!requestJSONBufferLock(JSON_LOCK_SERVEJSON)) { request->deferResponse(); return; }
   count = min(unsigned(count), length - unsigned(from));
-  AsyncJsonResponse *response = new AsyncJsonResponse(false, JSON_ARRAY_SIZE(128) + JSON_OBJECT_SIZE(6));
+  AsyncJsonResponse *response = new AsyncJsonResponse(JSON_ARRAY_SIZE(128) + JSON_OBJECT_SIZE(6), false);
   JsonObject root = response->getRoot();
   root["from"] = from; root["count"] = count; root["frame"] = strip.getLastShow();
   JsonArray values = root.createNestedArray("pixels");
