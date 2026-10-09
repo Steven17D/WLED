@@ -154,7 +154,7 @@ bool copyOwnedJson(JsonVariant source, JsonVariant destination, unsigned depth =
     for (JsonPair pair : source.as<JsonObject>()) {
       String key(pair.key().c_str());
       if (key.length() != strlen(pair.key().c_str())) return false;
-      if (!copyOwnedJson(pair.value(), object[key], depth + 1)) return false;
+      if (!copyOwnedJson(pair.value(), object[key].to<JsonVariant>(), depth + 1)) return false;
     }
   } else if (source.is<JsonArray>()) {
     JsonArray array = destination.to<JsonArray>();
