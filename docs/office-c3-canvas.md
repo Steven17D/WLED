@@ -140,3 +140,19 @@ firmware targets and all 19 Node tests passed. The fix was uploaded over Wi-Fi;
 JSON or JavaScript errors. Scene, layout, configuration and presets were restored
 and checked against fresh pre-update snapshots. These fix-specific checks are
 separate from the earlier ten-minute canvas/driver qualification above.
+
+## Strip paths in 2D Peek
+
+The normal WLED Peek iframe (`/liveview2D`) overlays the four saved strip paths
+on the existing binary L2 matrix preview. Colored lines and names show positions;
+a circle marks the first LED and an arrow marks the final LED, respecting reversal.
+The Strips checkbox hides the overlay. A strip using an independent effect is
+marked with a dashed line and an own-effect label. Realtime ownership pauses the
+scene image and displays a notice while retaining the path positions.
+
+Initial geometry comes from a read-only `/json/state` request. WebSocket state
+updates refresh the overlay without polling or writing configuration. Peek reuses
+the main UI's socket and removes its listener when the iframe closes. The overlay
+scales with the displayed grid, including downsampled and padded L2 frames, and
+redraws immediately on resizing. Ordinary matrix controllers without enabled
+canvas metadata retain their matrix preview and hide the overlay controls.
