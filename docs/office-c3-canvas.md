@@ -156,3 +156,22 @@ the main UI's socket and removes its listener when the iframe closes. The overla
 scales with the displayed grid, including downsampled and padded L2 frames, and
 redraws immediately on resizing. Ordinary matrix controllers without enabled
 canvas metadata retain their matrix preview and hide the overlay controls.
+
+The overlay passed rendered-pixel/browser checks for all four paths, toggle,
+reversal, live geometry and own-effect updates, mobile resizing, realtime notice,
+invalid/absent metadata and text-only names. Closing the view removes its message
+listener while retaining the parent socket. The same four-strip acceptance check
+failed against the original Peek page, which had no strip control.
+
+Both firmware targets and 19 Node tests passed. After Wi-Fi OTA, the actual main
+WLED Peek button passed desktop/mobile and close/reopen checks with all four
+names, parent-socket reuse, no JavaScript errors and zero HTTP state writes.
+Startup off passed, then the latest pre-upload scene/layout was restored exactly;
+configuration and presets were unchanged and the driver reported zero errors.
+
+During this OTA the router assigned Office `192.168.0.15` rather than its previous
+`.20` address. The same controller MAC was verified through mDNS and `/json/info`.
+The installed Pulsar's saved Office address was updated to `.15`, preserving its
+four strip settings and Output-off state. Current direct Peek URL:
+`http://192.168.0.15/liveview2D`. Fresh backups, previous firmware and qualification
+artifacts are retained privately under `20261009-peek-strips`.
