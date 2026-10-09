@@ -954,7 +954,7 @@ class WS2812FX {
     inline uint16_t getTransition() const   { return _transitionDur; }    // returns currently set transition time (in ms)
     inline uint16_t getMappedPixelIndex(uint16_t index) const {           // convert logical address to physical
 #ifdef WLED_ENABLE_SPATIAL_CANVAS
-      if (spatialCanvasEnabled() && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps)) return spatialCanvasMap(index);
+      if (spatialCanvasEnabled()) return spatialCanvasUsesScene() ? spatialCanvasMap(index) : index;
 #endif
       if (index < customMappingSize && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps)) index = customMappingTable[index];
       return index;

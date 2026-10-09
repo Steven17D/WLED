@@ -19,8 +19,10 @@ are IDs 1..4, at logical starts 640/759/877/908. WLED's reported logical pixel
 count becomes 939; `/json/info.canvas.physicalCount` remains 299. The canvas
 state also advertises physical GPIO/range descriptors and the logical offset.
 Pulsar must use those descriptors for names, and keep physical DDP offsets
-0/476/948/1072 bytes. DDP with normal unmapped realtime addressing temporarily
-takes over the physical outputs; the device scene resumes afterward.
+0/476/948/1072 bytes. Realtime DDP always retains physical addressing, including when the existing
+respect-ledmaps setting is enabled. The virtual grid is internal scene storage,
+not a realtime LED map. DDP temporarily takes over the physical outputs; the device scene resumes afterward. The editor pauses its scene preview during
+physical realtime control so it does not misrepresent the host stream.
 
 A physical segment can select a different WLED effect, brightness or power
 setting while other strips sample Scene. Geometry changes preserve current
@@ -33,7 +35,9 @@ The `/canvas` page edits layout and native effect parameters. Edits are local
 until Save layout. Accepted state changes are bounded and queued to the main
 loop, where topology changes cannot race the effect service. A replacement
 pixel buffer is allocated before releasing the previous one; rejected geometry
-or allocation leaves the prior configuration active. Config saves occur only
+leaves the prior configuration active. Failure to allocate the replacement global
+frame buffer is rejected before its previous buffer is released; segment buffers
+retain WLED's standard allocation checks. Config saves occur only
 for explicit edits. Custom sampling has no per-frame allocation.
 
 Grid sizes have a 16:10 aspect ratio, width 16..64 and height 10..40. The UI
@@ -45,6 +49,16 @@ on the actual C3 for the chosen effect and resolution.
 The bounded read-only `/canvas/pixels?from=0&count=64` endpoint reports physical
 bus readback and composed pixel values. Add `scene=1` to read scene pixels.
 It exists for qualification and rejects ranges larger than 64 per request.
+An on-demand snapshot transfers ownership between the main loop and HTTP through
+an atomic handoff; a first request can return retryable HTTP 503 while capture is
+pending. `pixels` is WLED's lossy bus readback, which can return zero with ABL
+disabled after its brightness-restoration factor rounds to zero. Use `composed`
+for sampler validation; neither field proves the physical wiring or LED appearance.
+
+Queued commands deep-copy HTTP-owned keys and strings while retaining numeric
+values. Coordinates use stable four-decimal state output. Save layout persists
+geometry; save a normal WLED preset to retain the complete scene/effect settings
+across startup.
 
 ## Validation before deployment
 

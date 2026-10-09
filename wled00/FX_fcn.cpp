@@ -1729,7 +1729,7 @@ void WS2812FX::show() {
   size_t paintStart = 0;
 #ifdef WLED_ENABLE_SPATIAL_CANVAS
   if (spatialCanvasEnabled()) {
-    if (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps) paintStart = spatialCanvasOffset();
+    if (spatialCanvasUsesScene()) paintStart = spatialCanvasOffset();
     else totalLen = getLengthPhysical(); // DDP retains physical addressing 0...298
   }
 #endif

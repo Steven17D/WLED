@@ -11,7 +11,8 @@ using SpatialCanvasMath::Path;
 struct Look {
   uint32_t colors[3] = {0xFFA000, 0, 0};
   uint8_t fx = 9, pal = 0, speed = 64, intensity = 128, opacity = 255, cct = 127;
-  uint8_t custom1 = 128, custom2 = 128, custom3 = 16;
+  uint8_t custom1 = 128, custom2 = 128, custom3 = 16, blendMode = 0;
+  bool check1 = false, check2 = false, check3 = false;
   uint16_t options = SEGMENT_ON, offset = 0;
   uint8_t grouping = 1, spacing = 0;
   char name[33] = {};
@@ -73,9 +74,9 @@ bool readPoint(JsonVariant value, SpatialCanvasMath::Point &point) {
   if (coordinates.size() != 2 || !coordinates[0].is<float>() || !coordinates[1].is<float>()) return false;
   point = {coordinates[0].as<float>(), coordinates[1].as<float>()};
   if (!SpatialCanvasMath::valid(point)) return false;
-  // Stabilize six-decimal JSON round trips; finer precision cannot affect this grid.
-  point.x = roundf(point.x * 1000000.0f) / 1000000.0f;
-  point.y = roundf(point.y * 1000000.0f) / 1000000.0f;
+  // Stabilize four-decimal layout round trips despite embedded float parsing error.
+  point.x = roundf(point.x * 10000.0f) / 10000.0f;
+  point.y = roundf(point.y * 10000.0f) / 10000.0f;
   return true;
 }
 
@@ -110,6 +111,7 @@ void capture(Look &look, const Segment &seg) {
   look.fx = seg.mode; look.pal = seg.palette; look.speed = seg.speed; look.intensity = seg.intensity;
   look.opacity = seg.opacity; look.cct = seg.cct; look.options = seg.options;
   look.custom1 = seg.custom1; look.custom2 = seg.custom2; look.custom3 = seg.custom3;
+  look.check1 = seg.check1; look.check2 = seg.check2; look.check3 = seg.check3; look.blendMode = seg.blendMode;
   look.grouping = seg.grouping; look.spacing = seg.spacing; look.offset = seg.offset;
   if (seg.name) strlcpy(look.name, seg.name, sizeof(look.name));
 }
@@ -119,6 +121,7 @@ void apply(const Look &look, Segment &seg) {
   for (unsigned j = 0; j < 3; j++) seg.colors[j] = look.colors[j];
   seg.opacity = look.opacity; seg.cct = look.cct; seg.options = look.options;
   seg.custom1 = look.custom1; seg.custom2 = look.custom2; seg.custom3 = look.custom3;
+  seg.check1 = look.check1; seg.check2 = look.check2; seg.check3 = look.check3; seg.blendMode = look.blendMode;
   seg.grouping = look.grouping; seg.spacing = look.spacing; seg.offset = look.offset;
   seg.setName(look.name);
 }
@@ -128,6 +131,7 @@ void writeLook(JsonObject object, const Look &look) {
   object["sx"] = look.speed; object["ix"] = look.intensity; object["bri"] = look.opacity;
   object["cct"] = look.cct; object["options"] = look.options;
   object["c1"] = look.custom1; object["c2"] = look.custom2; object["c3"] = look.custom3;
+  object["o1"] = look.check1; object["o2"] = look.check2; object["o3"] = look.check3; object["bm"] = look.blendMode;
   object["grp"] = look.grouping; object["spc"] = look.spacing; object["of"] = look.offset;
   JsonArray colors = object.createNestedArray("colors");
   for (uint32_t color : look.colors) colors.add(color);
@@ -140,6 +144,7 @@ void readLook(JsonObject object, Look &look) {
   look.opacity = object["bri"] | 255; look.cct = object["cct"] | 127;
   look.options = object["options"] | SEGMENT_ON;
   look.custom1 = object["c1"] | 128; look.custom2 = object["c2"] | 128; look.custom3 = object["c3"] | 16;
+  look.check1 = object["o1"] | false; look.check2 = object["o2"] | false; look.check3 = object["o3"] | false; look.blendMode = object["bm"] | 0;
   look.grouping = max(1, object["grp"] | 1); look.spacing = object["spc"] | 0; look.offset = object["of"] | 0;
   for (unsigned j = 0; j < 3; j++) look.colors[j] = object["colors"][j] | look.colors[j];
 }
@@ -187,6 +192,8 @@ bool legacyBounds(JsonObject root) {
 }
 
 bool spatialCanvasEnabled() { return canvas.enabled; }
+// Realtime addresses physical LEDs; the virtual grid is an internal scene, not a ledmap.
+bool spatialCanvasUsesScene() { return realtimeMode == REALTIME_MODE_INACTIVE || useMainSegmentOnly || realtimeOverride > REALTIME_OVERRIDE_NONE; }
 uint16_t spatialCanvasOffset() { return unsigned(canvas.width) * canvas.height; }
 // Virtual pixels advertise RGBW capability, but show() never paints them on a bus.
 uint16_t spatialCanvasMap(uint16_t index) {
@@ -265,7 +272,7 @@ void spatialCanvasLoop() {
     pixelSnapshot.sceneLength = canvas.enabled ? spatialCanvasOffset() : 0;
     pixelSnapshot.physicalLength = min(unsigned(strip.getLengthPhysical()), 1024U);
     for (unsigned i = 0; i < pixelSnapshot.sceneLength; i++) pixelSnapshot.scene[i] = strip.getPixelColorNoMap(i);
-    unsigned offset = canvas.enabled && (realtimeMode == REALTIME_MODE_INACTIVE || realtimeRespectLedMaps) ? spatialCanvasOffset() : 0;
+    unsigned offset = canvas.enabled && spatialCanvasUsesScene() ? spatialCanvasOffset() : 0;
     for (unsigned i = 0; i < pixelSnapshot.physicalLength; i++) {
       pixelSnapshot.physical[i] = BusManager::getPixelColor(i);
       pixelSnapshot.composed[i] = strip.getPixelColorNoMap(offset + i);
@@ -374,6 +381,7 @@ void spatialCanvasWriteState(JsonObject root) {
   object["scene"] = 0; object["sliceFx"] = sliceEffect;
   object["physicalCount"] = strip.getLengthPhysical();
   object["pending"] = pending; object["error"] = canvasError;
+  object["realtime"] = canvas.enabled && !spatialCanvasUsesScene();
   JsonArray paths = object.createNestedArray("strips");
   for (unsigned i = 0; i < 4 && i < BusManager::getNumBusses(); i++) {
     const Bus *bus = BusManager::getBus(i);
@@ -386,8 +394,8 @@ void spatialCanvasWriteState(JsonObject root) {
     path["name"] = seg.name ? seg.name : (canvas.normal[i].name[0] ? canvas.normal[i].name : defaultNames[i]);
     JsonArray a = path.createNestedArray("a"), b = path.createNestedArray("b");
     // Fixed decimal output avoids ArduinoJson float formatting losing one last digit.
-    a.add(serialized(String(canvas.paths[i].a.x, 6))); a.add(serialized(String(canvas.paths[i].a.y, 6)));
-    b.add(serialized(String(canvas.paths[i].b.x, 6))); b.add(serialized(String(canvas.paths[i].b.y, 6)));
+    a.add(serialized(String(canvas.paths[i].a.x, 4))); a.add(serialized(String(canvas.paths[i].a.y, 4)));
+    b.add(serialized(String(canvas.paths[i].b.x, 4))); b.add(serialized(String(canvas.paths[i].b.y, 4)));
     path["reverse"] = canvas.paths[i].reverse;
   }
 }

@@ -119,7 +119,7 @@
 		for (const [id,key,fallback] of [['speed','sx',128],['intensity','ix',128],['custom1','c1',128],['custom2','c2',128],['custom3','c3',16]]) byId(id).value=scene?.[key]??fallback;
 		for (let i=1;i<=3;i++) byId(`check${i}`).checked=scene?.[`o${i}`]??false;
 		rows();parameterLabels();dirty=false;connected=true;controls(true);
-		status(layout.enabled?'Scene runs on the controller · layout saved':'Canvas is off · physical strip controls remain active');
+		status(layout.realtime?'Realtime stream controls the strips · scene preview paused':layout.enabled?'Scene runs on the controller · layout saved':'Canvas is off · physical strip controls remain active');
 	}
 	async function save() {
 		if (!connected) return;
@@ -148,14 +148,15 @@
 	function draw() {
 		context.clearRect(0,0,plane.width,plane.height);
 		if(layout) {
-			if(layout.enabled&&pixels.length) for(let y=0;y<frameHeight;y++) for(let x=0;x<frameWidth;x++) {context.fillStyle=`rgba(${sample([x/Math.max(1,frameWidth-1),y/Math.max(1,frameHeight-1)]).join(',')},.45)`;context.fillRect(x*plane.width/frameWidth,y*plane.height/frameHeight,plane.width/frameWidth+1,plane.height/frameHeight+1);}
+			if(layout.enabled&&!layout.realtime&&pixels.length) for(let y=0;y<frameHeight;y++) for(let x=0;x<frameWidth;x++) {context.fillStyle=`rgba(${sample([x/Math.max(1,frameWidth-1),y/Math.max(1,frameHeight-1)]).join(',')},.45)`;context.fillRect(x*plane.width/frameWidth,y*plane.height/frameHeight,plane.width/frameWidth+1,plane.height/frameHeight+1);}
 			layout.strips.forEach((path,index)=>{
 				const a=[path.a[0]*plane.width,path.a[1]*plane.height],b=[path.b[0]*plane.width,path.b[1]*plane.height];
 				context.lineWidth=index===selected?13:8;context.lineCap='round';context.strokeStyle=colors[index];context.beginPath();context.moveTo(...a);context.lineTo(...b);context.stroke();
 				context.font='15px system-ui';context.fillStyle='white';context.fillText(path.name,Math.min(a[0],b[0]),Math.min(a[1],b[1])-14);
 				for(const point of [a,b]) {context.beginPath();context.arc(...point,index===selected?9:5,0,Math.PI*2);context.fillStyle='#15191f';context.fill();context.strokeStyle=colors[index];context.lineWidth=2;context.stroke();}
-				const slice=byId('slices').children[index]?.querySelector('canvas');if(slice) {const ctx=slice.getContext('2d');for(let i=0;i<path.len;i++){let t=path.len>1?i/(path.len-1):.5;if(path.reverse)t=1-t;const point=[path.a[0]+t*(path.b[0]-path.a[0]),path.a[1]+t*(path.b[1]-path.a[1])];ctx.fillStyle=layout.enabled?`rgb(${sample(point).join(',')})`:'#15191f';ctx.fillRect(i,0,1,14);}}
+				const slice=byId('slices').children[index]?.querySelector('canvas');if(slice) {const ctx=slice.getContext('2d');for(let i=0;i<path.len;i++){let t=path.len>1?i/(path.len-1):.5;if(path.reverse)t=1-t;const point=[path.a[0]+t*(path.b[0]-path.a[0]),path.a[1]+t*(path.b[1]-path.a[1])];ctx.fillStyle=layout.enabled&&!layout.realtime?`rgb(${sample(point).join(',')})`:'#15191f';ctx.fillRect(i,0,1,14);}}
 			});
+			if(layout.realtime){context.font='20px system-ui';context.fillStyle='#a7b7cb';context.fillText('Realtime control · scene preview paused',20,plane.height-20);}
 		}requestAnimationFrame(draw);
 	}
 	function position(event) {const rect=plane.getBoundingClientRect();return [(event.clientX-rect.left)/rect.width,(event.clientY-rect.top)/rect.height];}
@@ -183,7 +184,7 @@
 		const url=new URL(getURL('/ws'),location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';
 		socket=new WebSocket(url);socket.binaryType='arraybuffer';
 		socket.onopen=()=>socket.send(JSON.stringify({lv:true}));
-		socket.onmessage=event=>{if(typeof event.data==='string'){try{const next=JSON.parse(event.data),reported=next.state||next;if(reported.canvas&&!reported.canvas.pending&&!dirty&&!saving)receive(reported);}catch{}return;}const data=new Uint8Array(event.data);if(data.length<4||data[0]!==76||data[1]!==2)return;const width=data[2],height=data[3];if(!width||!height||width>64||height>40||data.length!==4+width*height*3)return;frameWidth=width;frameHeight=height;pixels=[];for(let i=4;i<data.length;i+=3)pixels.push([data[i],data[i+1],data[i+2]]);};
+		socket.onmessage=event=>{if(typeof event.data==='string'){try{const next=JSON.parse(event.data),reported=next.state||next;if(reported.canvas&&layout)layout.realtime=!!reported.canvas.realtime;if(reported.canvas&&!reported.canvas.pending&&!dirty&&!saving)receive(reported);}catch{}return;}const data=new Uint8Array(event.data);if(data.length<4||data[0]!==76||data[1]!==2)return;const width=data[2],height=data[3];if(!width||!height||width>64||height>40||data.length!==4+width*height*3)return;frameWidth=width;frameHeight=height;pixels=[];for(let i=4;i<data.length;i+=3)pixels.push([data[i],data[i+1],data[i+2]]);};
 		socket.onclose=()=>{pixels=[];setTimeout(connectPreview,3000);};socket.onerror=()=>socket.close();
 	}
 	async function init() {
