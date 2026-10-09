@@ -378,7 +378,7 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
 {
   bool stateResponse = root[F("v")] | false;
 #ifdef WLED_ENABLE_SPATIAL_CANVAS
-  if (spatialCanvasQueue(root, presetId)) return stateResponse;
+  if (spatialCanvasQueue(root, presetId, callMode)) return stateResponse;
 #endif
 
   #if defined(WLED_DEBUG) && defined(WLED_DEBUG_HOST)

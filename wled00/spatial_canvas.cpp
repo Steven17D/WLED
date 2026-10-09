@@ -28,7 +28,7 @@ struct CanvasConfig {
 CanvasConfig canvas;
 StaticJsonDocument<12288> pendingDocument;
 bool pending = false, processing = false;
-uint8_t sliceEffect = 0, canvasError = 0;
+uint8_t sliceEffect = 0, canvasError = 0, pendingPresetId = 0, pendingCallMode = CALL_MODE_DIRECT_CHANGE;
 // On-demand snapshots transfer ownership between HTTP and the main loop.
 // No request pointer survives a callback, and HTTP never reads a live render buffer.
 struct PixelSnapshot {
@@ -72,7 +72,11 @@ bool readPoint(JsonVariant value, SpatialCanvasMath::Point &point) {
   JsonArray coordinates = value.as<JsonArray>();
   if (coordinates.size() != 2 || !coordinates[0].is<float>() || !coordinates[1].is<float>()) return false;
   point = {coordinates[0].as<float>(), coordinates[1].as<float>()};
-  return SpatialCanvasMath::valid(point);
+  if (!SpatialCanvasMath::valid(point)) return false;
+  // Stabilize six-decimal JSON round trips; finer precision cannot affect this grid.
+  point.x = roundf(point.x * 1000000.0f) / 1000000.0f;
+  point.y = roundf(point.y * 1000000.0f) / 1000000.0f;
+  return true;
 }
 
 // Validate the entire edit before publishing any changes.
@@ -164,7 +168,7 @@ uint16_t spatialCanvasMap(uint16_t index) {
   return index < offset ? 0 : index - offset;
 }
 
-bool spatialCanvasQueue(JsonObject root, uint8_t presetId) {
+bool spatialCanvasQueue(JsonObject root, uint8_t presetId, uint8_t callMode) {
   // Preserve a legacy startup-off preset without replacing the new canvas geometry.
   if (presetId && presetId == bootPreset && !(root["on"] | true) && legacyBounds(root)) {
     root.remove("seg");
@@ -186,6 +190,7 @@ bool spatialCanvasQueue(JsonObject root, uint8_t presetId) {
   pendingDocument.clear();
   if (deserializeJson(pendingDocument, serialized.c_str()) || pendingDocument.overflowed()) { canvasError = 1; pendingDocument.clear(); return true; }
   if (!root.containsKey("canvas")) pendingDocument["canvas"]["enabled"] = false;
+  pendingPresetId = presetId; pendingCallMode = callMode;
   pending = true; canvasError = 0;
   return true;
 }
@@ -307,7 +312,8 @@ void spatialCanvasLoop() {
     } else canvas = candidate;
     if (!canvasError) {
       processing = true;
-      deserializeState(root);
+      deserializeState(root, pendingCallMode, pendingPresetId);
+      if (pendingPresetId && pendingPresetId < 255 && !errorFlag) currentPreset = pendingPresetId;
       processing = false;
       configNeedsWrite = true;
       strip.trigger();

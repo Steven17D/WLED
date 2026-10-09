@@ -6,7 +6,7 @@
 bool spatialCanvasEnabled();
 uint16_t spatialCanvasOffset();
 uint16_t spatialCanvasMap(uint16_t index);
-bool spatialCanvasQueue(JsonObject root, uint8_t presetId = 0);
+bool spatialCanvasQueue(JsonObject root, uint8_t presetId = 0, uint8_t callMode = CALL_MODE_DIRECT_CHANGE);
 void spatialCanvasLoop();
 void spatialCanvasRegisterEffect();
 void spatialCanvasReadConfig(JsonObject root);
