@@ -83,3 +83,44 @@ Requested omp Opus 5.5 help was attempted with
 generating a response: `No API key found for anthropic.` These designs therefore
 have no Opus contribution. Authentication remains the blocker for that request.
 Main integration still requires Steven's approval after production testing.
+
+## Round 4: Canvas selected and refined through Agentation
+
+Steven selected option 1 and requested a self-driving Agentation review, focusing
+on the rectangle that appeared cut off. Option 1 now draws the synthetic artwork
+inside a larger rounded artboard with a visible surface and border. The blur
+filter region is expanded before clipping so it no longer produces an abrupt
+inner rectangle. The clip remains stationary as the scene rotates.
+
+The floating inspector retains its power header and rounded outer shell while
+the controls scroll in a separate bounded viewport. A More controls / Back to
+color footer makes the hidden RGBW controls discoverable. The strip dock also
+has a rounded shell, conditional edge fades, and shorter name/LED-count cards.
+On compact windows the dock joins the inner scroller to preserve at least a
+full control row. Steven's live Agentation annotation about the scene caption
+was addressed by moving that information into a small info button.
+
+The optional local review tooling in `tools/wled-ui-review` adds the genuine
+Agentation React toolbar and an in-memory loopback server without changing
+WLED's production dependencies. Four annotations were created/read through
+the toolbar/MCP connection, acknowledged, fixed, verified, and resolved. Three
+were agent critiques and one came from Steven during the review. The captured
+session and reproducible setup are in that folder. Other variants and the
+accepted round 2 original are unchanged.
+
+Round 4 validation: 36 browser assertions checked the Canvas interactions,
+all four rotations, rounded clipping, expanded blur bounds, stationary header,
+reachable White channel, menus, nested settings, presets, strip direction and
+request isolation. Thirteen compact checks covered 320x568, followed by a
+visual correction that increased the inner control viewport from 36px to
+109px and verified that the complete White slider remained visible. Live
+resizing back to 390x844 and 728x700 checked dock placement and fixed bounds.
+Twenty further checks confirmed all six variants still load, keep fixed bounds,
+and accept effect selection. Native browser clicks verified the panel footer
+scrolls to White and back; native arrow-key input changed brightness without
+switching variants. `npm test` passed all 19 existing tests. Screenshots were
+inspected on desktop, phone and compact phone. No new automated test files were
+committed. The boundary and inner-scroller checks were false before the fixes.
+
+This remains a local prototype on `wled-ui-facelift`. There is no firmware upload
+or main integration in this review round.
