@@ -42,3 +42,44 @@ Keep this prototype on `wled-ui-facelift`. Implement the accepted interaction
 model in production separately, preserve WLED's controls and configuration,
 validate browser behavior, embedded size and firmware builds, then obtain
 Steven's approval before merging to fork `main`.
+
+## Round 3: five additional options
+
+Steven accepted the round 2 design and requested five more options. The original
+file stays unchanged. Open the new self-contained comparison at
+http://localhost:8094/wled-ui-options-prototype.html?variant=1 using the same server.
+The selector and arrows belong to the prototype comparison, not the product UI.
+
+| Key | Name | Layout question |
+| --- | --- | --- |
+| 0 | Original | Accepted scene, inspector and bottom strip dock |
+| 1 | Canvas | Should controls float over a larger scene? |
+| 2 | Control Center | Should brightness and color lead, with a smaller scene? |
+| 3 | Workbench | Should strip selection use a left rail, with tuning below the scene? |
+| 4 | Studio | Should the scene use a dark surface and a bottom control tray? |
+| 5 | Scenes | Should a preset library lead, with fine tuning in a sheet? |
+
+Each key is shareable through `?variant=`. Demo light settings survive switches
+in memory; reloading resets them. Left/right arrows cycle designs except while
+editing inputs or using a dialog. No hardware requests or persistent writes occur.
+Each variant retains power, brightness, RGBW color, effect/palette menus,
+orientation, strip focus/direction, presets and contained settings screens.
+Studio and Scenes also provide a Fine tune sheet for motion and white controls.
+
+Validation: 132 browser assertions covered the six designs at 728x700; 36 checks
+covered 390x844; 48 covered 320x568. After spacing and resize corrections, another
+40 assertions covered fixed bounds, menus, nested settings, Fine tune focus,
+state retention and URL selection. Native clicks and keyboard events confirmed
+comparison arrows and that an arrow key adjusts a focused slider without
+switching designs. Live resizing moved Canvas's strip dock between its desktop
+and phone positions while root and window scroll stayed zero. Control Center's
+phone strip selectors also appeared after resizing without a reload. Every new
+layout was visually inspected on desktop and phone; inline variants were checked
+at 728px with a fixed 700px frame and no console errors. `npm test` passed all 19
+existing tests. Production assets and firmware are untouched by this round.
+
+Requested omp Opus 5.5 help was attempted with
+`omp --model claude-opus-5-5 --no-tools --no-session -p ...`. It failed before
+generating a response: `No API key found for anthropic.` These designs therefore
+have no Opus contribution. Authentication remains the blocker for that request.
+Main integration still requires Steven's approval after production testing.
