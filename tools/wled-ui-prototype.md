@@ -124,3 +124,25 @@ committed. The boundary and inner-scroller checks were false before the fixes.
 
 This remains a local prototype on `wled-ui-facelift`. There is no firmware upload
 or main integration in this review round.
+
+## Round 5: flatten Canvas's visual hierarchy
+
+Steven found that the bounded revision introduced too much nesting. Canvas now
+uses one calm window surface: the workspace background, floating inspector card,
+control-group cards and strip-dock card are removed. Thin dividers organize the
+controls and strip selector. Selected strips retain a small selection highlight,
+and the scene retains its deliberate rounded artboard and clipped glow.
+
+The inner control viewport, stationary power header, overflow cue and contextual
+menus remain. This is a visual refinement of option 1; the accepted original and
+the other four new designs are unchanged. The previous Canvas revision is
+captured in commit `20ce168b`.
+
+Validation: browser checks confirmed transparent, unboxed workspace, inspector,
+control groups and dock, retained scene clipping, power and strip selection,
+effect selection with redraw, and the info sheet. Live resizing at 320x568,
+390x844 and 728x700 confirmed zero root/window scroll, stationary power header,
+reachable White slider, bounded strip selector and settings sheet. Screenshots
+were inspected at 1280px, 728px, 360px and compact phone width; inline previews
+reported no errors. No production assets or firmware were changed. Main remains
+pending Steven's approval after implementation and testing.
