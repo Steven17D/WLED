@@ -1,4 +1,4 @@
-# Dark Canvas controls
+# Canvas control interface
 
 `/control` is a device-hosted, dependency-free dark interface. It keeps a fixed
 outer window, a bounded scene, and separate scrolling areas for controls and
@@ -38,6 +38,41 @@ review. Other effects use a neutral icon. Reference thumbnails do not claim to
 show the current palette, speed or effect frame; all controller effects remain
 selectable, and the live scene shows controller frames.
 
+## Design and interaction refinement
+
+The October 10 refinement uses one content surface, a restrained system-font
+hierarchy and brighter temporary surfaces. Room-wide power and brightness stay
+in the toolbar; the inspector targets the selected scene or strip. Advanced
+controls move into one reusable sheet. Effects, palettes and targets open
+anchored pickers on desktop and larger sheets on phones. Only the inspector,
+picker results, sheet body and horizontal strip dock scroll; the outer window
+stays fixed.
+
+This follows Apple's current [material hierarchy](https://developer.apple.com/design/human-interface-guidelines/materials),
+[typography](https://developer.apple.com/design/human-interface-guidelines/typography),
+[popover](https://developer.apple.com/design/human-interface-guidelines/popovers),
+[sheet](https://developer.apple.com/design/human-interface-guidelines/sheets) and
+[accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility)
+guidance. The CSS is an original browser implementation, with original SVG
+icons and a system font stack. It does not bundle Apple's fonts or symbols.
+
+The displayed frame retains its aspect ratio. Painting and pointer mapping use
+the same letterboxed bounds, and labels/handles retain screen-space size.
+Ordinary path clicks select a strip without creating a draft. Explicit layout
+editing alone enables dragging, with Save and Discard always available in the
+scene and a full scene workspace on phones. Real changes create a draft;
+reverting all geometry clears it. Offline editing permits local Discard and
+requires reconnection before Save.
+
+Stable strip buttons preserve keyboard focus during polling. Closing a picker
+returns focus to its trigger; after a confirmed command, temporarily disabled
+controls regain focus if it was lost to the document body. A newly focused
+control or another open dialog retains focus. Reduced motion, transparency and
+increased-contrast preferences have explicit CSS fallbacks. Phone controls have
+44-pixel hit regions, including compact toolbar icons and color selectors.
+Frame status remains visible on phones, and preview boost is also reachable
+through More controls.
+
 ## Build
 
 `tools/cdata.js` inlines the page, shared helpers, styles and reference stills into
@@ -55,7 +90,38 @@ Office qualification also uses the existing private `office_c3_canvas` override
 and installed PlatformIO core/toolchain. This UI change does not alter the
 output driver or canvas firmware implementation.
 
-## October 10, 2026 qualification
+## Apple-inspired refinement qualification
+
+Three agents independently researched Apple's primary design guidance, reviewed
+rendered layouts, exercised interactions and audited the source. Three visual
+review rounds closed picker content overflow, small-phone scene collapse,
+redundant scene framing, hidden selector cues and compact sheet action wrapping.
+Final source review found no unresolved P0/P1/P2 findings.
+
+Fresh browser checks covered desktop 1080 × 760, phone 390 × 844 and 320 × 568.
+Every effect/palette cell contains its thumbnail, name and selection marker;
+title/search/footer remain fixed while results scroll. Phone layout editing
+uses the full workspace, with a 268 × 167.5-pixel preview even at 320 × 568.
+Every checked phone toolbar, range, color and sheet action has a 44-pixel hit
+region. Document bounds stay fixed and the strip dock stays inside the stage.
+
+Simulator qualification covered stable polling focus, picker close/apply/error
+focus return, advanced navigation cleanup, ordinary strip selection without a
+draft, genuine drag/Discard, numeric Save/readback, global-versus-selected scope,
+HTTP rejection, acknowledged no-op rejection, command queue recovery, bounded
+pending readback, offline disable/frame clearing and reconnection. All fault
+flags and modified simulator state were restored. Ninety independent geometry
+assertions covered painting/pointer bounds across desktop/phone dimensions,
+DPR 1/2 and multiple frame aspect ratios.
+
+The refined page also connected to Office's actual 220 effects, 72 palettes and
+live frames. A temporary 3% Aurora review scene was confirmed, then the original
+off state, canvas geometry, configuration and presets were restored and compared
+against a fresh private backup. Driver errors remained zero. No firmware was
+uploaded. The asset build, 19 existing Node tests and ESP32/Office C3 firmware
+compilation passed after the final source changes.
+
+## Earlier October 10, 2026 functional qualification
 
 The UI was tested locally against a simulator and against Office through an
 explicit loopback SSH tunnel. No new firmware was uploaded.

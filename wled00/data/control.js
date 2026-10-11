@@ -2,10 +2,10 @@
 // A device-hosted UI over json.cpp, spatial_canvas.cpp and ws.cpp. No synthetic live pixels.
 'use strict';
 const ui = id => document.getElementById(id);
-const model = {state:null,info:null,effects:[],fxdata:[],palettes:[],palx:{},presets:{},target:null,color:0,online:false,pending:0,view:'scene',paths:true,draft:null,frame:null,lastFrame:0};
+const model = {state:null,info:null,effects:[],fxdata:[],palettes:[],palx:{},presets:{},target:null,color:0,online:false,pending:0,view:'scene',paths:true,draft:null,editing:false,frame:null,lastFrame:0};
 const stripColors = ['#e9b28e','#83bca7','#87acdf','#bb9cdc'];
 const frameCanvas=document.createElement('canvas'),frameContext=frameCanvas.getContext('2d');
-let commandQueue = Promise.resolve(), reconnectTimer, refreshTimer, socket, drag, initializing=false;
+let commandQueue = Promise.resolve(), reconnectTimer, refreshTimer, socket, drag, initializing=false, sheetCleanup, sheetOpener;
 const wait = milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds));
 const clamp = (value,min=0,max=255) => Math.max(min,Math.min(max,Number(value)));
 const percent = value => `${Math.round(value/255*100)}%`;
@@ -21,7 +21,9 @@ function label(text,control) {const element=node('label',text);element.append(co
 function input(type,value,min,max) {const element=node('input');element.type=type;if(min!==undefined)element.min=min;if(max!==undefined)element.max=max;element.value=value??'';return element;}
 function select(options,value) {const element=node('select');for(const [id,text] of options){const option=node('option',text);option.value=id;element.append(option);}element.value=value;return element;}
 function checkbox(text,checked) {const element=input('checkbox');element.checked=!!checked;const wrapper=label(text,element);wrapper.className='check-row';wrapper.prepend(element);return {element,wrapper};}
-function showError(error) {setText('command-status',error.message||String(error));const existing=ui('sheet-body').querySelector('.error');existing?.remove();if(ui('sheet').open)ui('sheet-body').append(node('p',error.message||String(error),'error'));}
+function showError(error) {setText('command-status',error.message||String(error));ui('command-status').dataset.state='error';const existing=ui('sheet-body').querySelector('.error');existing?.remove();if(ui('sheet').open){const message=node('p',error.message||String(error),'error');message.setAttribute('role','alert');ui('sheet-body').prepend(message);}}
+// Keep native range semantics while exposing the filled track to the visual layer.
+function rangeProgress(control) {const min=Number(control.min)||0,max=Number(control.max)||100;control.style.setProperty('--progress',`${(Number(control.value)-min)/Math.max(1,max-min)*100}%`);}
 // Bound every request; an interrupted connection never becomes a successful local edit.
 async function api(path,body) {
 	const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),8000);
@@ -29,9 +31,12 @@ async function api(path,body) {
 	finally {clearTimeout(timeout);}
 }
 function connection(online) {
-	model.online=online;ui('lighting').disabled=!online||!!model.pending;ui('power').disabled=!online||!!model.pending;
-	for(const id of ['presets-button','target-button','layout-button'])ui(id).disabled=!online;
-	ui('retry').hidden=online;
+	model.online=online;document.querySelector('.window').dataset.state=!online?'offline':model.pending?'pending':'online';ui('lighting').disabled=!online||!!model.pending;ui('power').disabled=!online||!!model.pending;
+	ui('brightness').disabled=!online||!!model.pending;
+	for(const id of ['presets-button','target-button','layout-button','advanced-button'])if(ui(id))ui(id).disabled=!online;
+	ui('advanced-controls')?.querySelectorAll('button').forEach(item=>item.disabled=!online||!!model.pending);
+	ui('layout-editbar')?.querySelectorAll('button').forEach(item=>item.disabled=!!model.pending||(item.dataset.action!=='discard'&&!online)||(item.dataset.action==='save'&&!model.draft));
+	ui('sheet').querySelectorAll('.sheet-actions [data-action=save]').forEach(item=>item.disabled=!model.draft||!online||!!model.pending);if(ui('layout-editbar'))ui('layout-editbar').querySelector('.layout-summary').textContent=!online?'Offline':model.draft?'Unsaved layout':'Edit layout';ui('retry').hidden=online;
 	setText('connection',online?(model.info?.simulated?'Simulator · no hardware connected':'Connected · WLED '+(model.info?.ver||'')):'Offline · controls unavailable');
 	if(!online){model.frame=null;setText('frame-status','Controller disconnected');draw();}
 }
@@ -49,7 +54,7 @@ function applied(next,requested) {
 }
 // Serialize mutations and read back queued canvas/preset changes before acknowledging them.
 function send(body,description='Saved on controller',verify,verifyFields=true) {
-	const requested=structuredClone(body);model.pending++;connection(model.online);setText('command-status','Applying…');
+	const requested=structuredClone(body),origin=document.activeElement;model.pending++;connection(model.online);setText('command-status','Applying…');ui('command-status').dataset.state='busy';
 	const operation=commandQueue.then(async()=>{
 		if(!model.online)throw new Error('Controller is offline');
 		await api('/json/state',{...requested,v:true});
@@ -61,23 +66,30 @@ function send(body,description='Saved on controller',verify,verifyFields=true) {
 			if(requested.ps!==undefined && requested.ps>0 && next.ps!==requested.ps && next.pl!==requested.ps)continue;
 			if(verifyFields&&!requested.psave&&!requested.pdel&&!requested.ps&&!applied(next,requested))continue;
 			if(verify&&!verify(next))continue;
-			receive(next);setText('command-status',description);return next;
+			receive(next);setText('command-status',description);ui('command-status').dataset.state='ready';return next;
 		}
 		throw new Error('Controller did not confirm the change');
 	});
 	commandQueue=operation.catch(()=>{});
-	return operation.catch(error=>{showError(error);throw error;}).finally(()=>{model.pending--;if(!model.pending)render();});
+	return operation.catch(error=>{showError(error);throw error;}).finally(()=>{model.pending--;if(!model.pending){render();if(!ui('sheet').open&&document.activeElement===document.body&&origin?.isConnected&&!origin.matches(':disabled'))origin.focus({preventScroll:true});}});
 }
 function change(body,description,verify) {send(body,description,verify).catch(()=>{});}
 function changeSegment(values,description) {const id=segment()?.id;if(id!==undefined)change({seg:[{id,...values}]},description);}
-function openSheet(title,back) {
-	const native=!!ui('sheet-body').querySelector('iframe');ui('sheet-title').textContent=title;ui('sheet-body').className='sheet-body';ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();ui('sheet-back').hidden=!back;ui('sheet-back').onclick=back||null;if(!ui('sheet').open)ui('sheet').showModal();return ui('sheet-body');
+// One dialog hosts menus and forms. Cleanup restores borrowed controls before any navigation.
+function clearSheet() {if(ui('sheet').sheetAnchor)ui('sheet').sheetAnchor.setAttribute('aria-expanded','false');const native=!!ui('sheet-body').querySelector('iframe');if(sheetCleanup){const cleanup=sheetCleanup;sheetCleanup=null;cleanup();}ui('sheet').querySelector(':scope > .sheet-actions')?.remove();ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();}
+function placeSheet(anchor) {const dialog=ui('sheet');if(!anchor){for(const key of ['--sheet-left','--sheet-top','--sheet-width'])dialog.style.removeProperty(key);return;}const rect=anchor.getBoundingClientRect(),width=Math.min(380,innerWidth-32),height=Math.min(dialog.getBoundingClientRect().height||500,innerHeight-32),beside=anchor.closest('.inspector')&&rect.left-width-12>=16,left=clamp(beside?rect.left-width-12:rect.right-width,16,innerWidth-width-16),top=clamp(beside?rect.top-24:rect.bottom+10,16,Math.max(16,innerHeight-height-16));dialog.style.setProperty('--sheet-width',width+'px');dialog.style.setProperty('--sheet-left',left+'px');dialog.style.setProperty('--sheet-top',top+'px');}
+function openSheet(title,back,options={}) {
+	const dialog=ui('sheet'),wasOpen=dialog.open;if(!back&&wasOpen&&dialog.dataset.kind==='advanced')back=advancedSheet;
+	if(!wasOpen)sheetOpener=options.anchor||document.activeElement;
+	clearSheet();ui('sheet-title').textContent=title;ui('sheet-body').className='sheet-body';dialog.dataset.presentation=options.anchor?'popover':'sheet';dialog.dataset.kind=options.kind||'form';dialog.sheetAnchor=options.anchor||null;if(options.anchor){options.anchor.setAttribute('aria-haspopup','dialog');options.anchor.setAttribute('aria-expanded','true');}placeSheet(options.anchor);ui('sheet-back').hidden=!back;ui('sheet-back').onclick=back||null;if(!wasOpen)dialog.showModal();requestAnimationFrame(()=>{if(dialog.open&&dialog.sheetAnchor===options.anchor)placeSheet(options.anchor);});return ui('sheet-body');
 }
+// Actions remain reachable while only the form content scrolls.
+function sheetActions(...actions) {const footer=node('div',undefined,'sheet-actions');footer.append(...actions);ui('sheet').append(footer);return footer;}
 function resumePreview(){if(socket?.readyState===WebSocket.OPEN)socket.send('{"lv":true}');}
 function refreshPalettes(){if(model.online)loadPalettes().then(()=>render()).catch(()=>{});}
-function closeSheet() {const native=!!ui('sheet-body').querySelector('iframe');ui('sheet').close();ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();}
+function closeSheet() {if(!ui('sheet').open)return;ui('sheet').close();clearSheet();if(sheetOpener?.isConnected&&!sheetOpener.disabled)sheetOpener.focus();}
 ui('sheet-close').onclick=closeSheet;
-ui('sheet').addEventListener('close',()=>{if(ui('sheet').open)return;const native=!!ui('sheet-body').querySelector('iframe');ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();});
+ui('sheet').addEventListener('close',()=>{if(ui('sheet').open)return;clearSheet();if(sheetOpener?.isConnected&&!sheetOpener.disabled)sheetOpener.focus();});
 ui('sheet').addEventListener('click',event=>{if(event.target===ui('sheet')){const rect=ui('sheet').getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)closeSheet();}});
 // Render gradient stops returned by /json/palx, including live custom colors and default palettes.
 function paletteGradient(id) {
@@ -88,13 +100,13 @@ function paletteGradient(id) {
 }
 function effectThumb(id) {
 	const thumb=node('span',undefined,'thumbnail');if(id===0){thumb.style.background=colorHex(segment()?.col?.[0]||[0,0,0]);return thumb;}
-	const reference=window.wledEffectReferences?.[id];if(reference){const image=node('img');image.src=reference;image.alt='Reference frame';thumb.append(image);}else thumb.textContent='✦';return thumb;
+	const reference=window.wledEffectReferences?.[id];if(reference){const image=node('img');image.src=reference;image.alt='Reference frame';thumb.append(image);}else{const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS('http://www.w3.org/2000/svg','use');svg.setAttribute('class','icon');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');use.setAttribute('href','#icon-light');svg.append(use);thumb.append(svg);}return thumb;
 }
 function paletteThumb(id) {const thumb=node('span',undefined,'thumbnail');thumb.style.background=paletteGradient(id)||'#33353d';return thumb;}
 function render() {
 	if(!model.state)return;const s=model.state,seg=segment();
 	ui('lighting').disabled=!model.online||!!model.pending;ui('power').disabled=!model.online||!!model.pending;
-	setText('device-name',model.info?.name||'WLED');setText('target-button',nameOf(seg)+' ⌄');setPressed('power',s.on);
+	setText('device-name',model.info?.name||'WLED');setText('target-button',nameOf(seg));setPressed('power',s.on);if(ui('power-label'))setText('power-label',s.on?'On':'Off');
 	const value=(id,next)=>{if(document.activeElement!==ui(id))ui(id).value=next;};
 	value('brightness',s.bri||1);setText('brightness-value',percent(ui('brightness').value));
 	const channels=seg.col?.[model.color]||[0,0,0,0];value('color',colorHex(channels));value('hex',colorHex(channels).toUpperCase());
@@ -108,37 +120,45 @@ function render() {
 	ui('orientation-button').hidden=!(seg.stopY-seg.startY>1);setText('orientation-name',seg.tp?(seg.rev&&!seg.rY?'90°':!seg.rev&&seg.rY?'270°':'Custom'):seg.rev&&seg.rY?'180°':!seg.rev&&!seg.rY?'0°':'Custom');
 	setText('timer-name',s.nl?.on?`${Math.ceil((s.nl.rem>=0?s.nl.rem:s.nl.dur*60)/60)} min`:'Off');setPressed('sync-button',s.udpn?.send);setText('sync-name',s.udpn?.send?'On':'Off');setText('transition-name',`${(s.transition??0)/10}s`);setText('realtime-name',['Live source','Override once','Override until reboot'][s.lor||0]);
 	ui('layout-button').hidden=!s.canvas;ui('paths-button').hidden=!s.canvas?.enabled;setPressed('paths-button',model.paths);
-	ui('strip-dock').replaceChildren();
 	const strips=s.canvas?.strips||s.seg.map(item=>({name:nameOf(item),segment:item.id,len:item.len||item.stop-item.start}));
-	strips.forEach((path,index)=>{const item=button('',()=>{model.target=path.segment;render();draw();});item.setAttribute('aria-pressed',String(path.segment===model.target));const dot=node('span',undefined,'strip-dot');dot.style.background=stripColors[index%4];item.append(dot,node('span',path.name),node('small',`${path.len} LEDs`));ui('strip-dock').append(item);});
+	renderStrips(strips);
+	for(const control of document.querySelectorAll('input[type=range]'))rangeProgress(control);
 	setText('scene-caption',s.canvas?.enabled?`${s.canvas.width} × ${s.canvas.height} · ${s.canvas.physicalCount} physical LEDs`:`${model.info?.leds?.count??0} LEDs · controller preview`);
 	connection(model.online);
+}
+// Update the same keyed light buttons on every poll so keyboard focus never disappears.
+function renderStrips(strips) {
+	const dock=ui('strip-dock'),keys=new Set(strips.map(path=>String(path.segment)));
+	for(const item of [...dock.children])if(!keys.has(item.dataset.segment))item.remove();
+	strips.forEach((path,index)=>{let item=[...dock.children].find(child=>child.dataset.segment===String(path.segment));if(!item){item=button('',()=>{model.target=Number(item.dataset.segment);render();draw();},'strip-item');item.dataset.segment=path.segment;item.append(node('span',undefined,'strip-dot'),node('span',undefined,'strip-name'),node('small'));dock.append(item);}item.setAttribute('aria-pressed',String(path.segment===model.target));item.disabled=!model.online;item.querySelector('.strip-dot').style.background=stripColors[index%4];item.querySelector('.strip-name').textContent=path.name;item.querySelector('small').textContent=`${path.len} LEDs`;if(dock.children[index]!==item)dock.insertBefore(item,dock.children[index]);});
 }
 function renderParameters(seg) {
 	const descriptions=(model.fxdata[seg.fx]||'').split(';')[0].split(',');const defaults=['Speed','Intensity','Custom 1','Custom 2','Custom 3','Option 1','Option 2','Option 3'];
 	const signature=seg.id+':'+seg.fx;
-	if(ui('parameters').dataset.signature===signature){for(const key of ['sx','ix','c1','c2','c3','o1','o2','o3']){const control=ui('parameter-'+key);if(!control||document.activeElement===control)continue;if(control.type==='checkbox')control.checked=!!seg[key];else{control.value=seg[key]??128;control.previousElementSibling.textContent=control.value;}}return;}
+	if(ui('parameters').dataset.signature===signature){for(const key of ['sx','ix','c1','c2','c3','o1','o2','o3']){const control=ui('parameter-'+key);if(!control||document.activeElement===control)continue;if(control.type==='checkbox')control.checked=!!seg[key];else{control.value=seg[key]??128;control.previousElementSibling.textContent=control.value;rangeProgress(control);}}return;}
 	ui('parameters').dataset.signature=signature;
 	ui('parameters').replaceChildren();
 	['sx','ix','c1','c2','c3','o1','o2','o3'].forEach((key,index)=>{const text=descriptions[index];if(!text)return;const name=text==='!'?defaults[index]:text;
-		if(index<5){const control=input('range',seg[key]??128,0,key==='c3'?31:255);control.id='parameter-'+key;control.setAttribute('aria-label',name);const wrapper=label(name,control);wrapper.className='range-label';const output=node('output',String(control.value));wrapper.insertBefore(output,control);control.oninput=()=>output.textContent=control.value;control.onchange=()=>changeSegment({[key]:Number(control.value)});ui('parameters').append(wrapper);}
+		if(index<5){const control=input('range',seg[key]??128,0,key==='c3'?31:255);control.id='parameter-'+key;control.setAttribute('aria-label',name);const wrapper=label(name,control);wrapper.className='range-label';const output=node('output',String(control.value));wrapper.insertBefore(output,control);control.oninput=()=>{output.textContent=control.value;rangeProgress(control);};control.onchange=()=>changeSegment({[key]:Number(control.value)});ui('parameters').append(wrapper);}
 		else{const {element,wrapper}=checkbox(name,seg[key]);element.id='parameter-'+key;element.onchange=()=>changeSegment({[key]:element.checked});ui('parameters').append(wrapper);}
 	});
 }
+// Browse verified reference frames and controller palette stops without exposing technical IDs as choices.
 function pick(kind) {
-	const body=openSheet(kind==='fx'?'Effects':'Palettes');const search=input('search','');search.placeholder='Search '+(kind==='fx'?'effects':'palettes');search.setAttribute('aria-label',search.placeholder);const searchRow=node('div',undefined,'search');searchRow.append(search);body.append(searchRow);
-	const list=node('div',undefined,'picker-list');body.append(list);
-	body.append(note(kind==='fx'?'Reference frames show real WLED effects at reference settings. The canvas shows your controller’s output.':'Palette ramps use the controller’s RGB stops. Random Cycle is generated on the controller.'));
+	const anchor=ui(kind==='fx'?'effect-button':'palette-button'),body=openSheet(kind==='fx'?'Effects':'Palettes',null,{anchor,kind:kind==='fx'?'effects':'palettes'});body.classList.add('picker-body');
+	const search=input('search','');search.placeholder='Search '+(kind==='fx'?'effects':'palettes');search.setAttribute('aria-label',search.placeholder);const searchRow=node('div',undefined,'search');searchRow.append(search);body.append(searchRow);
+	const list=node('div',undefined,'picker-list picker-grid '+(kind==='fx'?'effect-grid':'palette-grid'));body.append(list);
+	body.append(note(kind==='fx'?'Reference frames · Live output appears in your scene.':'Controller palettes · Current colors update live.'));
 	const entries=kind==='fx'?model.effects.map((name,id)=>[id,name]):[...model.palettes.map((name,id)=>[id,name]),...Object.keys(model.palx).map(Number).filter(id=>id>=model.palettes.length).map(id=>[id,`Custom palette ${id}`])];
-	function fill(){list.replaceChildren();entries.filter(([,name])=>name.toLowerCase().includes(search.value.toLowerCase())).forEach(([id,name])=>{const item=button('',()=>{closeSheet();changeSegment({[kind]:id,...(kind==='fx'?{fxdef:true}:{})});},'menu-row');item.append(kind==='fx'?effectThumb(id):paletteThumb(id),node('span',name,'item-name'),node('small',id===segment()?.[kind]?'✓':String(id)));list.append(item);});if(!list.children.length)list.append(note('No matches'));}
+	function fill(){list.replaceChildren();entries.filter(([,name])=>name.toLowerCase().includes(search.value.trim().toLowerCase())).forEach(([id,name])=>{const selected=id===segment()?.[kind],item=button('',()=>{closeSheet();changeSegment({[kind]:id,...(kind==='fx'?{fxdef:true}:{})});},'picker-item');item.setAttribute('aria-label',name);item.setAttribute('aria-pressed',String(selected));item.dataset.id=id;item.title=name+' · '+(kind==='fx'?'Effect ':'Palette ')+id;const mark=node('span',selected?'✓':'','selected-mark');mark.setAttribute('aria-hidden','true');item.append(kind==='fx'?effectThumb(id):paletteThumb(id),node('span',name,'item-name'),mark);list.append(item);});if(!list.children.length)list.append(note('No matches. Try another name.'));}
 	search.oninput=fill;fill();search.focus();
 }
 ui('effect-button').onclick=()=>pick('fx');ui('palette-button').onclick=()=>pick('pal');
-ui('target-button').onclick=()=>{const body=openSheet('Control a segment');for(const item of model.state.seg){const row=button('',()=>{model.target=item.id;render();closeSheet();draw();},'menu-row');row.append(node('span',nameOf(item),'item-name'),node('small',item.id===model.target?'✓':String(item.id)));body.append(row);}body.append(button('All selected segments',()=>{const body=openSheet('Selected segments');body.append(note('Color and effect controls target the segment shown in the inspector. These switches set WLED’s selected-segment group for presets and API commands.'));for(const item of model.state.seg){const c=checkbox(nameOf(item),item.sel);c.element.onchange=()=>change({seg:[{id:item.id,sel:c.element.checked}]});body.append(c.wrapper);}},'full-row'));};
-ui('power').onclick=()=>change({on:!model.state.on});ui('brightness').oninput=()=>setText('brightness-value',percent(ui('brightness').value));ui('brightness').onchange=()=>change({bri:Number(ui('brightness').value)});
+ui('target-button').onclick=()=>{const body=openSheet('Adjust',null,{anchor:ui('target-button'),kind:'target'});for(const item of model.state.seg){const row=button('',()=>{model.target=item.id;render();closeSheet();draw();},'menu-row');row.append(node('span',nameOf(item),'item-name'),node('small',item.id===model.target?'✓':String(item.id)));body.append(row);}body.append(button('All selected segments',()=>{const body=openSheet('Selected segments');body.append(note('Color and effect controls target the segment shown in the inspector. These switches set WLED’s selected-segment group for presets and API commands.'));for(const item of model.state.seg){const c=checkbox(nameOf(item),item.sel);c.element.onchange=()=>change({seg:[{id:item.id,sel:c.element.checked}]});body.append(c.wrapper);}},'full-row'));};
+ui('power').onclick=()=>change({on:!model.state.on});ui('brightness').oninput=()=>{setText('brightness-value',percent(ui('brightness').value));rangeProgress(ui('brightness'));};ui('brightness').onchange=()=>change({bri:Number(ui('brightness').value)});
 ui('color-slots').querySelectorAll('button').forEach(item=>item.onclick=()=>{model.color=Number(item.dataset.color);render();});
 function sendColor(hex,white) {const colors=structuredClone(segment().col||[[0,0,0,0],[0,0,0,0],[0,0,0,0]]);if(hex){if(!/^#[0-9a-f]{6}$/i.test(hex)){showError(new Error('Use a six-digit hex color'));render();return;}colors[model.color]=[1,3,5].map(index=>parseInt(hex.slice(index,index+2),16)).concat(colors[model.color]?.[3]||0);}if(white!==undefined)colors[model.color][3]=white;changeSegment({col:colors});}
-ui('color').onchange=()=>sendColor(ui('color').value);ui('hex').onchange=()=>sendColor(ui('hex').value);ui('white').oninput=()=>setText('white-value',percent(ui('white').value));ui('white').onchange=()=>sendColor(null,Number(ui('white').value));ui('cct').onchange=()=>changeSegment({cct:Number(ui('cct').value)});ui('swap').onclick=()=>{const colors=structuredClone(segment().col);[colors[0],colors[1]]=[colors[1],colors[0]];changeSegment({col:colors});};
+ui('color').onchange=()=>sendColor(ui('color').value);ui('hex').onchange=()=>sendColor(ui('hex').value);ui('white').oninput=()=>{setText('white-value',percent(ui('white').value));rangeProgress(ui('white'));};ui('white').onchange=()=>sendColor(null,Number(ui('white').value));ui('cct').oninput=()=>{setText('cct-value',percent(ui('cct').value));rangeProgress(ui('cct'));};ui('cct').onchange=()=>changeSegment({cct:Number(ui('cct').value)});ui('swap').onclick=()=>{const colors=structuredClone(segment().col);[colors[0],colors[1]]=[colors[1],colors[0]];changeSegment({col:colors});};
 ui('sync-button').onclick=()=>change({udpn:{send:!model.state.udpn?.send}});
 ui('follow-scene-button').onclick=()=>changeSegment({fx:model.state.canvas.sliceFx});
 ui('orientation-button').onclick=()=>{const body=openSheet('Scene orientation');[[0,false,false,false],[90,true,false,true],[180,true,true,false],[270,false,true,true]].forEach(([angle,rev,rY,tp])=>body.append(button(angle+'°',()=>{closeSheet();changeSegment({rev,rY,tp});},'menu-row')));};
@@ -158,17 +178,23 @@ function segmentSheet(item=segment(),creating=false) {
 	if(!protectedBounds&&!creating){actions.append(button('New segment',()=>{const ids=new Set(model.state.seg.map(s=>s.id));let id=0;while(ids.has(id))id++;segmentSheet({...item,id,n:'',start:0,stop:model.info?.leds?.count||item.stop},true);}));if(model.state.seg.length>1)actions.append(button('Delete segment',()=>{const target=openSheet('Delete segment');target.append(note(`Remove ${nameOf(item)}?`),button('Delete',()=>{closeSheet();change({seg:[{id:item.id,stop:0}]});},'danger'));},'danger'));}body.append(actions);
 }
 ui('segment-button').onclick=()=>segmentSheet();
+// Borrow the existing advanced controls and restore them before leaving this sheet.
+function advancedSheet() {
+	if(!ui('advanced-controls'))return;const body=openSheet('More controls',null,{kind:'advanced'}),controls=ui('advanced-controls'),parent=controls.parentNode,placeholder=document.createComment('advanced controls home');parent.insertBefore(placeholder,controls);controls.hidden=false;body.append(controls);const boost=checkbox('Boost preview',ui('boost').checked);boost.element.onchange=()=>{ui('boost').checked=boost.element.checked;draw();};body.append(boost.wrapper,note('Only brightens this preview.'));
+	sheetCleanup=()=>{placeholder.parentNode?.insertBefore(controls,placeholder);placeholder.remove();controls.hidden=true;};connection(model.online);
+}
+if(ui('advanced-button'))ui('advanced-button').onclick=advancedSheet;
 async function loadPalettes() {
 	let pages=1;const data={};for(let page=0;page<pages;page++){if(page)await wait(75);const value=await api('/json/palx?page='+page);pages=Math.min(64,(value.m??0)+1);Object.assign(data,value.p||{});}model.palx=data;
 }
 async function loadPresets() {model.presets=await api('/presets.json');return model.presets;}
 function presetEntries() {return Object.entries(model.presets).filter(([id,value])=>Number(id)>0&&Number(id)<=250&&value&&typeof value==='object');}
 function presetSheet() {
-	const body=openSheet('Presets');body.append(note('Stored on your WLED controller. Playlists carry their own timing and transitions.'));const actions=node('div',undefined,'row');actions.append(button('Save current look',()=>editPreset()),button('New playlist',()=>editPreset(null,true)),button('Stop playlist',()=>change({playlist:{}})));body.append(actions);
-	for(const [id,preset] of presetEntries()){const row=node('div',undefined,'row');const apply=button(`${preset.n||'Preset '+id}${preset.playlist?' ▶':''}`,()=>{closeSheet();change({ps:Number(id),...(preset.playlist?{on:true}:{})},'Preset applied');},'menu-row');apply.style.flex='1';row.append(apply,button('Edit',()=>editPreset(Number(id),!!preset.playlist)));body.append(row);}if(!presetEntries().length)body.append(note('No presets saved yet.'));
+	const body=openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'});body.append(note('Stored on your WLED controller. Playlists carry their own timing and transitions.'));const actions=node('div',undefined,'row');actions.append(button('Save current look',()=>editPreset()),button('New playlist',()=>editPreset(null,true)),button('Stop playlist',()=>change({playlist:{}})));body.append(actions);
+	for(const [id,preset] of presetEntries()){const row=node('div',undefined,'row preset-row');const apply=button(`${preset.n||'Preset '+id}${preset.playlist?' ▶':''}`,()=>{closeSheet();change({ps:Number(id),...(preset.playlist?{on:true}:{})},'Preset applied');},'menu-row');apply.style.flex='1';row.append(apply,button('Edit',()=>editPreset(Number(id),!!preset.playlist)));body.append(row);}if(!presetEntries().length)body.append(note('No presets saved yet.'));
 	body.append(button('Refresh',async()=>{try{await loadPresets();presetSheet();}catch(error){showError(error);}}));
 }
-ui('presets-button').onclick=async()=>{openSheet('Presets').append(note('Loading…'));try{await loadPresets();presetSheet();}catch(error){showError(error);}};
+ui('presets-button').onclick=async()=>{openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'}).append(note('Loading…'));try{await loadPresets();presetSheet();}catch(error){showError(error);}};
 async function confirmPreset(id,expected,fields) {const matches=(actual,expected)=>Array.isArray(expected)?Array.isArray(actual)&&expected.every((value,index)=>matches(actual[index],value)):expected&&typeof expected==='object'?Object.entries(expected).every(([key,value])=>matches(actual?.[key],value)):typeof expected==='boolean'&&(actual===0||actual===1)?Boolean(actual)===expected:actual===expected;for(let attempt=0;attempt<20;attempt++){await wait(200);await loadPresets();if(expected===null?!model.presets[id]:model.presets[id]?.n===expected&&(!fields||matches(model.presets[id],fields)))return;}throw new Error('Preset file did not confirm the change');}
 function editPreset(id,playlist=false) {
 	const existing=id?model.presets[id]:null;const body=openSheet(playlist?'Playlist':id?'Edit preset':'Save current look',presetSheet);
@@ -186,7 +212,7 @@ function editPreset(id,playlist=false) {
 		delete expected.o;if(playlist)delete expected.on;
 		Object.assign(payload,{psave:presetId,n:presetName,ql:quick.value});if(boot.element.checked)payload.bootps=presetId;await send(payload,'Saving preset…');await confirmPreset(presetId,presetName,expected);setText('command-status','Preset saved on controller');presetSheet();
 	}catch(error){showError(error);}}
-	actions.append(button('Save',()=>save(),'primary'));if(existing&&!playlist)actions.append(button('Replace with current look',()=>save(true)));if(id)actions.append(button('Delete',()=>{const body=openSheet('Delete preset',()=>editPreset(id,playlist));body.append(note(`Delete ${existing.n||'Preset '+id}?`),button('Delete',async()=>{try{await send({pdel:id},'Deleting preset…');await confirmPreset(id,null);setText('command-status','Preset deleted');presetSheet();}catch(error){showError(error);}},'danger'));},'danger'));body.append(actions);
+	actions.append(button('Save',()=>save(),'primary'));if(existing&&!playlist)actions.append(button('Replace with current look',()=>save(true)));if(id)actions.append(button('Delete',()=>{const body=openSheet('Delete preset',()=>editPreset(id,playlist));body.append(note(`Delete ${existing.n||'Preset '+id}?`),button('Delete',async()=>{try{await send({pdel:id},'Deleting preset…');await confirmPreset(id,null);setText('command-status','Preset deleted');presetSheet();}catch(error){showError(error);}},'danger'));},'danger'));sheetActions(...actions.children);
 }
 // Editable timed rows cover native playlist ordering, shuffle, repeats and final preset.
 function playlistEditor(body,stored,id) {
@@ -199,15 +225,38 @@ function playlistEditor(body,stored,id) {
 	renderRows();body.append(button('Add look',()=>{if(!choices.length||rows.length>=100)return;rows.push({preset:choices[0][0],duration:10,transition:.7});renderRows();}),label('Repeat count · 0 keeps playing',repeat),label('When finished',end),shuffle.wrapper,note('A duration of zero holds that look until you advance the playlist.'));
 	return ()=>{if(!rows.length||rows.some(row=>!Number.isInteger(row.preset)||row.preset<1||row.preset>250||!Number.isFinite(row.duration)||!Number.isFinite(row.transition)||row.transition>row.duration&&row.duration>0))throw new Error('Add a look with valid timing. Transition must fit within its duration.');return {ps:rows.map(row=>row.preset),dur:rows.map(row=>Math.round(row.duration*10)),transition:rows.map(row=>Math.round(row.transition*10)),repeat:Number(repeat.value),end:Number(end.value),r:shuffle.element.checked};};
 }
-// Layout remains a local draft until the firmware confirms the complete queued geometry.
+// Explicit edit mode separates light selection from geometry changes. Only a genuine edit creates a draft.
+function updateLayoutControls() {
+	const stage=ui('scene').closest('.stage');stage.dataset.editing=String(model.editing);
+	let bar=ui('layout-editbar');if(!model.editing){bar?.remove();return;}
+	if(!bar){bar=node('div',undefined,'layout-editbar');bar.id='layout-editbar';const summary=node('span',undefined,'layout-summary'),edit=button('Edit path',layoutSheet),discard=button('Discard',discardLayout),save=button('Save',saveLayout,'primary');save.dataset.action='save';discard.dataset.action='discard';bar.append(summary,edit,discard,save);stage.querySelector('.stage-toolbar').after(bar);}
+	bar.querySelector('.layout-summary').textContent=model.draft?'Unsaved layout':'Edit layout';ui('sheet').querySelectorAll('.sheet-actions [data-action=save]').forEach(item=>item.disabled=!model.draft||!model.online||!!model.pending);connection(model.online);
+}
+function layoutDraft() {if(!model.draft)model.draft=structuredClone(model.state.canvas);return model.draft;}
+// Reverting every geometric field clears the dirty marker rather than retaining a meaningless draft.
+function layoutChanged() {
+	const fields=value=>JSON.stringify({enabled:value.enabled,width:value.width,height:value.height,strips:value.strips.map(path=>({pin:path.pin,a:path.a,b:path.b,reverse:path.reverse}))});
+	if(model.draft&&fields(model.draft)===fields(model.state.canvas))model.draft=null;updateLayoutControls();draw();
+}
+function discardLayout() {model.draft=null;model.editing=false;drag=null;updateLayoutControls();closeSheet();draw();setText('command-status','Layout unchanged');}
+// Read back the saved geometry before leaving edit mode; rejected changes remain an editable draft.
+async function saveLayout() {
+	if(!model.draft)return;try {for(const control of ui('sheet-body').querySelectorAll('input[type=number]'))if(!control.reportValidity())return;
+		const draft=structuredClone(model.draft),canvas={enabled:draft.enabled,width:draft.width,height:draft.height,strips:draft.strips.map(path=>({pin:path.pin,a:path.a,b:path.b,reverse:path.reverse}))};
+		await send({canvas},'Layout saved on controller',next=>{const accepted=next.canvas;return accepted&&accepted.enabled===canvas.enabled&&accepted.width===canvas.width&&accepted.height===canvas.height&&canvas.strips.every(path=>{const match=accepted.strips.find(item=>item.pin===path.pin);return match&&match.reverse===path.reverse&&['a','b'].every(key=>path[key].every((v,i)=>Math.abs(match[key][i]-v)<.0002));});});model.draft=null;model.editing=false;drag=null;updateLayoutControls();closeSheet();draw();
+	}catch(error){showError(error);}
+}
 function layoutSheet() {
-	if(!model.state.canvas)return;
-	if(!model.draft)model.draft=structuredClone(model.state.canvas);
-	const body=openSheet('Strip layout');const enabled=checkbox('Use spatial canvas',model.draft.enabled);enabled.element.onchange=()=>model.draft.enabled=enabled.element.checked;body.append(enabled.wrapper);
-	const resolution=select([[32,'32 × 20'],[48,'48 × 30'],[64,'64 × 40']],model.draft.width);resolution.onchange=()=>{model.draft.width=Number(resolution.value);model.draft.height=model.draft.width*5/8;};body.append(label('Scene resolution',resolution));
-	body.append(note('Close this sheet to drag paths or their endpoints. Changes remain a draft until Save layout.'));
-	model.draft.strips.forEach((path,index)=>{const box=node('div',undefined,'layout-tools');box.append(node('p',path.name));for(const key of ['a','b']){const row=node('div',undefined,'endpoint');for(let axis=0;axis<2;axis++){const value=input('number',path[key][axis],0,1);value.step=.0001;value.onchange=()=>{if(value.reportValidity()){path[key][axis]=Number(value.value);draw();}};row.append(label(`${key==='a'?'First':'Last'} ${axis?'Y':'X'}`,value));}box.append(row);}const reversed=checkbox('Reverse LED order',path.reverse);reversed.element.onchange=()=>{path.reverse=reversed.element.checked;draw();};box.append(reversed.wrapper);body.append(box,node('div',undefined,'divider'));});
-	const actions=node('div',undefined,'row');actions.append(button('Save layout',async()=>{try{for(const control of body.querySelectorAll('input[type=number]'))if(!control.reportValidity())return;const draft=structuredClone(model.draft),canvas={enabled:draft.enabled,width:draft.width,height:draft.height,strips:draft.strips.map(path=>({pin:path.pin,a:path.a,b:path.b,reverse:path.reverse}))};await send({canvas},'Layout saved on controller',next=>{const accepted=next.canvas;return accepted&&accepted.enabled===canvas.enabled&&accepted.width===canvas.width&&canvas.strips.every(path=>{const match=accepted.strips.find(item=>item.pin===path.pin);return match&&match.reverse===path.reverse&&['a','b'].every(key=>path[key].every((v,i)=>Math.abs(match[key][i]-v)<.0002));});});model.draft=null;closeSheet();draw();}catch(error){showError(error);}},'primary'),button('Arrange paths',()=>{closeSheet();setText('command-status','Layout draft · drag paths, then Save in Layout');}),button('Discard',()=>{model.draft=null;closeSheet();draw();setText('command-status','Layout draft discarded');}));body.append(actions);
+	if(!model.state.canvas)return;model.editing=true;updateLayoutControls();
+	const layout=model.draft||model.state.canvas,body=openSheet('Edit layout'),enabled=checkbox('Use spatial canvas',layout.enabled);enabled.element.onchange=()=>{if(enabled.element.checked!==(model.draft||model.state.canvas).enabled){layoutDraft().enabled=enabled.element.checked;layoutChanged();}};
+	const resolution=select([[32,'32 × 20'],[48,'48 × 30'],[64,'64 × 40']],layout.width);resolution.onchange=()=>{if(Number(resolution.value)!==(model.draft||model.state.canvas).width){const draft=layoutDraft();draft.width=Number(resolution.value);draft.height=draft.width*5/8;layoutChanged();}};body.append(enabled.wrapper,label('Scene resolution',resolution));
+	const activeIndex=Math.max(0,layout.strips.findIndex(path=>path.segment===model.target)),pathChoice=select(layout.strips.map((path,index)=>[index,path.name||`Strip ${index+1}`]),activeIndex);body.append(label('Adjust path',pathChoice));const pathControls=node('div',undefined,'path-controls');body.append(pathControls);
+	function renderPath(){pathControls.replaceChildren();const index=Number(pathChoice.value),path=(model.draft||model.state.canvas).strips[index];if(!path)return;model.target=path.segment;render();draw();
+		for(const key of ['a','b']){const row=node('div',undefined,'endpoint');for(let axis=0;axis<2;axis++){const control=input('number',path[key][axis],0,1);control.step=.0001;control.onchange=()=>{if(control.reportValidity()&&Number(control.value)!==(model.draft||model.state.canvas).strips[index][key][axis]){layoutDraft().strips[index][key][axis]=Number(control.value);layoutChanged();}};row.append(label(`${key==='a'?'Start':'End'} ${axis?'Y':'X'}`,control));}pathControls.append(row);}
+		const reversed=checkbox('Reverse LED order',path.reverse);reversed.element.onchange=()=>{if(reversed.element.checked!==(model.draft||model.state.canvas).strips[index].reverse){layoutDraft().strips[index].reverse=reversed.element.checked;layoutChanged();}};pathControls.append(reversed.wrapper);
+	}
+	pathChoice.onchange=renderPath;renderPath();body.append(note('Arrange paths directly in the scene. Save and Discard remain available there.'));
+	const save=button('Save',saveLayout,'primary');save.dataset.action='save';save.disabled=!model.draft||!model.online;sheetActions(button('Arrange',()=>{closeSheet();setText('command-status','Edit layout · drag a path or endpoint');}),button('Discard',discardLayout),save);
 }
 ui('layout-button').onclick=layoutSheet;
 const settingsPages=[['Outputs & hardware','/settings/leds'],['Wi-Fi & network','/settings/wifi'],['Sync & streaming','/settings/sync'],['Time, schedules & macros','/settings/time'],['Matrix configuration','/settings/2D'],['User interface','/settings/ui'],['Usermods','/settings/um'],['Pins','/settings/pins'],['Security, backups & updates','/settings/sec'],['Firmware update','/update'],['Custom palettes','/cpal.htm'],['File manager','/edit']];
@@ -224,32 +273,51 @@ function nativeSheet(title,path) {
 	}catch(error){showError(new Error('Settings could not be styled; native controls remain available'));}};
 }
 function settingsSheet() {
-	const body=openSheet('Settings');for(const [title,path] of settingsPages){if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>nativeSheet(title,path),'menu-row');item.append(node('span',title,'item-name'),node('small','›'));body.append(item);}
-	body.append(button('JSON state command',jsonSheet,'menu-row'),button('Native WLED controls',()=>nativeSheet('WLED controls','/?native=1'),'menu-row'));
+	const body=openSheet('Settings',null,{anchor:ui('settings-button'),kind:'settings'}),grid=node('div',undefined,'settings-grid');body.append(grid);
+	for(const [title,path] of settingsPages){if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>nativeSheet(title,path),'menu-row');item.append(node('span',title,'item-name'),node('small','›'));grid.append(item);}
+	body.append(button('Advanced JSON command',jsonSheet,'menu-row'),button('Classic WLED controls',()=>nativeSheet('WLED controls','/?native=1'),'menu-row'));
 }
 ui('settings-button').onclick=settingsSheet;
 function jsonSheet(){const body=openSheet('JSON state command',settingsSheet),value=node('textarea');value.value=JSON.stringify({seg:[{id:segment()?.id??0}]},null,2);body.append(note('Send a standard WLED JSON state command. The controller validates it; the latest state is read back after acknowledgment.'),label('Command',value),button('Apply',async()=>{try{const command=JSON.parse(value.value);if(!command||Array.isArray(command)||typeof command!=='object')throw new Error('Enter a JSON object');await send(command,'Command acknowledged',undefined,false);closeSheet();}catch(error){showError(error);}},'primary'));}
 ui('info-button').onclick=()=>{const body=openSheet('About this controller'),info=model.info;if(!info){body.append(note('Controller information is unavailable while offline.'));return;}const dl=node('dl');for(const [title,value] of [['Name',info.name],['Firmware',info.ver],['Build',info.vid],['Architecture',info.arch],['LEDs',info.canvas?.physicalCount||info.leds?.count],['Uptime',`${Math.floor((info.uptime||0)/60)} min`],['Free heap',`${info.freeheap??'—'} bytes`],['Wi-Fi',`${info.wifi?.signal??'—'}%`],['IP',info.ip||location.hostname],['MAC',info.mac],['FPS',info.leds?.fps??info.fps]]){dl.append(node('dt',title),node('dd',String(value??'—')));}body.append(dl,note(info.simulated?'This is a local simulator. No hardware is connected.':'Scene frames are controller readback; visual brightness can be boosted in this browser.'));};
 // Draw bounded L1/L2 data, saved geometry and sampled paths. Realtime ownership hides stale scene frames.
 function frameColor(x,y,boost=1) {const frame=model.frame;if(!frame)return [0,0,0];const px=clamp(x,0,1)*(frame.width-1),py=clamp(y,0,1)*(frame.height-1),x0=Math.floor(px),y0=Math.floor(py),x1=Math.min(frame.width-1,x0+1),y1=Math.min(frame.height-1,y0+1),dx=px-x0,dy=py-y0;return [0,1,2].map(channel=>Math.min(255,Math.round(((frame.data[(y0*frame.width+x0)*3+channel]*(1-dx)+frame.data[(y0*frame.width+x1)*3+channel]*dx)*(1-dy)+(frame.data[(y1*frame.width+x0)*3+channel]*(1-dx)+frame.data[(y1*frame.width+x1)*3+channel]*dx)*dy)*boost)));}
+// Construct rounded canvas geometry without requiring newer Canvas roundRect support.
+function roundedPath(ctx,x,y,width,height,radius) {const r=Math.min(radius,width/2,height/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+width-r,y);ctx.quadraticCurveTo(x+width,y,x+width,y+r);ctx.lineTo(x+width,y+height-r);ctx.quadraticCurveTo(x+width,y+height,x+width-r,y+height);ctx.lineTo(x+r,y+height);ctx.quadraticCurveTo(x,y+height,x,y+height-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+// The same letterboxed drawing bounds drive painting and pointer coordinates at every display size.
+function sceneGeometry() {
+	const canvas=ui('scene'),scaleX=canvas.width/Math.max(1,canvas.clientWidth),scaleY=canvas.height/Math.max(1,canvas.clientHeight),inset=innerWidth<=600?16:32,availableW=Math.max(1,canvas.width-inset*scaleX),availableH=Math.max(1,canvas.height-inset*scaleY),frame=model.frame,aspect=frame&&frame.height>1?frame.width/frame.height:model.state?.canvas?.width/model.state?.canvas?.height||1.6,width=Math.min(availableW,availableH*aspect),height=width/aspect;
+	return {x:(canvas.width-width)/2,y:(canvas.height-height)/2,width,height,scaleX,scaleY};
+}
 function draw() {
-	const canvas=ui('scene'),ctx=canvas.getContext('2d'),w=canvas.width-48,h=canvas.height-48;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.save();ctx.translate(24,24);const s=model.state,layout=model.draft||s?.canvas;const realtime=!!s?.canvas?.realtime||!!model.info?.live;
-	const frameFresh=model.frame&&Date.now()-model.lastFrame<4000;const visible=frameFresh&&!realtime&&model.online,boost=ui('boost').checked?Math.min(32,255/Math.max(1,s?.bri||255)):1;
-	if(model.view==='scene'&&visible){const frame=model.frame;frameCanvas.width=frame.width;frameCanvas.height=frame.height;const image=frameContext.createImageData(frame.width,frame.height);for(let pixel=0;pixel<frame.width*frame.height;pixel++){for(let channel=0;channel<3;channel++)image.data[pixel*4+channel]=Math.min(255,frame.data[pixel*3+channel]*boost);image.data[pixel*4+3]=255;}frameContext.putImageData(image,0,0);ctx.imageSmoothingEnabled=true;ctx.drawImage(frameCanvas,0,0,w,h);}
+	const canvas=ui('scene'),pixelRatio=Math.min(2,window.devicePixelRatio||1),width=Math.max(1,Math.round(canvas.clientWidth*pixelRatio)),height=Math.max(1,Math.round(canvas.clientHeight*pixelRatio));if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}const ctx=canvas.getContext('2d'),bounds=sceneGeometry(),w=bounds.width,h=bounds.height;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.save();ctx.translate(bounds.x,bounds.y);const s=model.state,layout=model.draft||s?.canvas;const realtime=!!s?.canvas?.realtime||!!model.info?.live;
+	const frameFresh=model.frame&&Date.now()-model.lastFrame<4000,visible=frameFresh&&!realtime&&model.online,boost=ui('boost').checked?Math.min(32,255/Math.max(1,s?.bri||255)):1;
+	if(model.view==='scene'&&visible){const frame=model.frame;frameCanvas.width=frame.width;frameCanvas.height=frame.height;const image=frameContext.createImageData(frame.width,frame.height);for(let pixel=0;pixel<frame.width*frame.height;pixel++){for(let channel=0;channel<3;channel++)image.data[pixel*4+channel]=Math.min(255,frame.data[pixel*3+channel]*boost);image.data[pixel*4+3]=255;}frameContext.putImageData(image,0,0);ctx.save();roundedPath(ctx,0,0,w,h,16*canvas.width/Math.max(1,canvas.clientWidth));ctx.clip();ctx.imageSmoothingEnabled=true;ctx.drawImage(frameCanvas,0,0,w,h);ctx.restore();}
 	if(model.view==='strips'&&!layout?.enabled&&visible){const count=model.info?.leds?.count||model.frame.width*model.frame.height;const rowHeight=h/Math.max(1,s.seg.length);s.seg.forEach((item,index)=>{ctx.fillStyle='#bec2d0';ctx.font='18px -apple-system,sans-serif';ctx.fillText(nameOf(item),20,index*rowHeight+28,w-40);const len=Math.min(512,Math.max(1,item.stop-item.start));for(let pixel=0;pixel<len;pixel++){const offset=item.start+pixel/len*(item.stop-item.start),frameIndex=Math.min(model.frame.width*model.frame.height-1,Math.floor(offset/count*model.frame.width*model.frame.height)),x=frameIndex%model.frame.width,y=Math.floor(frameIndex/model.frame.width);ctx.fillStyle=`rgb(${frameColor(x/Math.max(1,model.frame.width-1),y/Math.max(1,model.frame.height-1),boost).join(',')})`;ctx.fillRect(20+pixel/len*(w-40),index*rowHeight+43,(w-40)/len+1,Math.max(8,Math.min(32,rowHeight-55)));}});}
-	if(layout?.enabled&&Array.isArray(layout.strips))layout.strips.forEach((path,index)=>{if(!Array.isArray(path.a)||!Array.isArray(path.b))return;const points=[path.a,path.b].map(point=>[point[0]*w,point[1]*h]),active=path.segment===model.target;const own=s?.seg.find(item=>item.id===path.segment)?.fx!==s?.canvas?.sliceFx;
-		if(model.view==='strips'&&visible&&!own){ctx.lineWidth=active?16:10;ctx.lineCap='round';const length=Math.min(path.len||100,512);for(let i=0;i<length-1;i++){let t=i/(length-1),next=(i+1)/(length-1);if(path.reverse){t=1-t;next=1-next;}const x=path.a[0]+t*(path.b[0]-path.a[0]),y=path.a[1]+t*(path.b[1]-path.a[1]);ctx.strokeStyle=`rgb(${frameColor(x,y,boost).join(',')})`;ctx.beginPath();ctx.moveTo(x*w,y*h);ctx.lineTo((path.a[0]+next*(path.b[0]-path.a[0]))*w,(path.a[1]+next*(path.b[1]-path.a[1]))*h);ctx.stroke();}}
-		if(!model.paths&&!model.draft)return;ctx.setLineDash(own?[10,8]:[]);ctx.lineWidth=active?5:3;ctx.strokeStyle=stripColors[index%4];ctx.beginPath();ctx.moveTo(...points[0]);ctx.lineTo(...points[1]);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=stripColors[index%4];const start=points[path.reverse?1:0],end=points[path.reverse?0:1];ctx.beginPath();ctx.arc(...start,7,0,Math.PI*2);ctx.fill();const angle=Math.atan2(end[1]-start[1],end[0]-start[0]);ctx.beginPath();ctx.moveTo(...end);ctx.lineTo(end[0]-15*Math.cos(angle-.5),end[1]-15*Math.sin(angle-.5));ctx.lineTo(end[0]-15*Math.cos(angle+.5),end[1]-15*Math.sin(angle+.5));ctx.closePath();ctx.fill();ctx.font='18px -apple-system,sans-serif';const text=String(path.name||`Strip ${index+1}`).slice(0,32)+(own?' · own effect':'');const width=Math.min(ctx.measureText(text).width,w-24),x=clamp((points[0][0]+points[1][0]-width)/2,12,w-width-12),y=clamp((points[0][1]+points[1][1])/2-17,23,h-12);ctx.fillStyle='#101115cc';ctx.fillRect(x-5,y-19,width+10,25);ctx.fillStyle=stripColors[index%4];ctx.fillText(text,x,y,width);
+	// Path strokes, labels and handles use screen-space sizes rather than shrinking on a phone.
+	const scaleX=canvas.width/Math.max(1,canvas.clientWidth),scaleY=canvas.height/Math.max(1,canvas.clientHeight),screenW=w/scaleX,screenH=h/scaleY;ctx.save();ctx.scale(scaleX,scaleY);
+	if(layout?.enabled&&Array.isArray(layout.strips))layout.strips.forEach((path,index)=>{if(!Array.isArray(path.a)||!Array.isArray(path.b))return;const points=[path.a,path.b].map(point=>[point[0]*screenW,point[1]*screenH]),active=path.segment===model.target,own=s?.seg.find(item=>item.id===path.segment)?.fx!==s?.canvas?.sliceFx;
+		if(model.view==='strips'&&visible&&!own){ctx.lineWidth=active?12:8;ctx.lineCap='round';const length=Math.min(path.len||100,512);for(let i=0;i<length-1;i++){let t=i/(length-1),next=(i+1)/(length-1);if(path.reverse){t=1-t;next=1-next;}const x=path.a[0]+t*(path.b[0]-path.a[0]),y=path.a[1]+t*(path.b[1]-path.a[1]);ctx.strokeStyle=`rgb(${frameColor(x,y,boost).join(',')})`;ctx.beginPath();ctx.moveTo(x*screenW,y*screenH);ctx.lineTo((path.a[0]+next*(path.b[0]-path.a[0]))*screenW,(path.a[1]+next*(path.b[1]-path.a[1]))*screenH);ctx.stroke();}}
+		if(!model.paths&&!model.editing)return;ctx.lineCap='round';ctx.setLineDash(own?[5,5]:[]);ctx.beginPath();ctx.moveTo(...points[0]);ctx.lineTo(...points[1]);ctx.lineWidth=active?4:3;ctx.strokeStyle='#090a0cc0';ctx.stroke();ctx.lineWidth=active?2:1;ctx.strokeStyle=stripColors[index%4];ctx.globalAlpha=active||model.editing?1:.6;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);
+		const start=points[path.reverse?1:0],end=points[path.reverse?0:1];ctx.fillStyle=stripColors[index%4];for(const point of [start,end]){ctx.beginPath();ctx.arc(...point,model.editing&&active?5:active?3.5:2.5,0,Math.PI*2);ctx.fill();if(model.editing&&active){ctx.lineWidth=2;ctx.strokeStyle='#1a1b21';ctx.stroke();}}
+		if(model.editing){const angle=Math.atan2(end[1]-start[1],end[0]-start[0]);ctx.beginPath();ctx.moveTo(...end);ctx.lineTo(end[0]-8*Math.cos(angle-.5),end[1]-8*Math.sin(angle-.5));ctx.lineTo(end[0]-8*Math.cos(angle+.5),end[1]-8*Math.sin(angle+.5));ctx.closePath();ctx.fill();}
+		if(active||model.editing||own){ctx.font='500 12px -apple-system,sans-serif';const text=String(path.name||`Strip ${index+1}`).slice(0,32)+(own?' · Own effect':''),textWidth=Math.min(ctx.measureText(text).width,Math.max(24,screenW-44)),width=textWidth+20,x=clamp((points[0][0]+points[1][0]-width)/2,3,screenW-width-3),y=clamp((points[0][1]+points[1][1])/2-34,3,screenH-27);roundedPath(ctx,x,y,width,24,12);ctx.fillStyle='#1b1c23ec';ctx.fill();ctx.fillStyle='#eceef5';ctx.fillText(text,x+10,y+16,textWidth);}
 	});
-	ctx.restore();
-	setText('frame-status',!model.online?'Controller disconnected':realtime?'Realtime stream · scene preview paused':!frameFresh?'Waiting for live controller frames':model.draft?'Layout draft · save to apply':model.info?.simulated?'Simulated frames · no hardware connected':model.view==='strips'&&layout?.enabled?'Scene samples · independent strip effects are not in this matrix frame':'Live controller frames');
+	ctx.restore();ctx.restore();
+	setText('frame-status',!model.online?'Controller disconnected':realtime?'Realtime stream · scene preview paused':!frameFresh?'Waiting for live controller frames':model.draft?'Unsaved layout':model.info?.simulated?'Simulated frames · no hardware connected':model.view==='strips'&&layout?.enabled?'Scene samples · excludes independent effects':'Live controller frames');
 }
 ui('paths-button').onclick=()=>{model.paths=!model.paths;setPressed('paths-button',model.paths);draw();};ui('boost').onchange=draw;
 for(const view of ['scene','strips'])ui(view+'-tab').onclick=()=>{model.view=view;setPressed('scene-tab',view==='scene');setPressed('strips-tab',view==='strips');draw();};
-function point(event){const rect=ui('scene').getBoundingClientRect();return [((event.clientX-rect.left)/rect.width*ui('scene').width-24)/(ui('scene').width-48),((event.clientY-rect.top)/rect.height*ui('scene').height-24)/(ui('scene').height-48)];}
-function distance(p,a,b){const dx=b[0]-a[0],dy=(b[1]-a[1])*.625,px=p[0]-a[0],py=(p[1]-a[1])*.625,t=clamp((px*dx+py*dy)/(dx*dx+dy*dy||1),0,1);return Math.hypot(px-t*dx,py-t*dy);}
-ui('scene').onpointerdown=event=>{if(!model.online||!model.state?.canvas?.enabled)return;const p=point(event),layout=model.draft||model.state.canvas;let best={distance:.04};layout.strips.forEach((path,index)=>{for(const handle of ['a','b']){const d=Math.hypot(p[0]-path[handle][0],(p[1]-path[handle][1])*.625);if(d<best.distance)best={distance:d,index,handle};}const d=distance(p,path.a,path.b);if(d<best.distance&&!['a','b'].includes(best.handle))best={distance:d,index,handle:'move'};});if(best.index===undefined)return;if(!model.draft)model.draft=structuredClone(layout);model.target=layout.strips[best.index].segment;drag={...best,point:p,path:structuredClone(model.draft.strips[best.index])};ui('scene').setPointerCapture(event.pointerId);setText('command-status','Layout draft · save in Layout');render();draw();};
-ui('scene').onpointermove=event=>{if(!drag)return;const p=point(event),path=model.draft.strips[drag.index];if(drag.handle==='move'){let dx=p[0]-drag.point[0],dy=p[1]-drag.point[1];dx=clamp(dx,-Math.min(drag.path.a[0],drag.path.b[0]),1-Math.max(drag.path.a[0],drag.path.b[0]));dy=clamp(dy,-Math.min(drag.path.a[1],drag.path.b[1]),1-Math.max(drag.path.a[1],drag.path.b[1]));for(const key of ['a','b'])path[key]=[drag.path[key][0]+dx,drag.path[key][1]+dy];}else path[drag.handle]=p.map(v=>clamp(v,0,1));draw();};ui('scene').onpointerup=ui('scene').onpointercancel=()=>drag=null;
+function point(event){const canvas=ui('scene'),rect=canvas.getBoundingClientRect(),bounds=sceneGeometry();return [((event.clientX-rect.left)/rect.width*canvas.width-bounds.x)/bounds.width,((event.clientY-rect.top)/rect.height*canvas.height-bounds.y)/bounds.height];}
+// Hit testing follows the displayed scene aspect ratio, including its protected inset.
+function distance(p,a,b){const bounds=sceneGeometry(),ratio=(bounds.height/bounds.scaleY)/(bounds.width/bounds.scaleX),dx=b[0]-a[0],dy=(b[1]-a[1])*ratio,px=p[0]-a[0],py=(p[1]-a[1])*ratio,t=clamp((px*dx+py*dy)/(dx*dx+dy*dy||1),0,1);return Math.hypot(px-t*dx,py-t*dy);}
+ui('scene').onpointerdown=event=>{if(!model.online||!model.state?.canvas?.enabled||!model.paths&&!model.editing)return;const p=point(event),layout=model.draft||model.state.canvas,canvas=ui('scene'),bounds=sceneGeometry(),screenWidth=bounds.width/bounds.scaleX,ratio=(bounds.height/bounds.scaleY)/screenWidth;let best={distance:Math.max(.02,12/screenWidth)};
+	layout.strips.forEach((path,index)=>{if(model.editing)for(const handle of ['a','b']){const d=Math.hypot(p[0]-path[handle][0],(p[1]-path[handle][1])*ratio);if(d<best.distance)best={distance:d,index,handle};}const d=distance(p,path.a,path.b);if(d<best.distance&&!['a','b'].includes(best.handle))best={distance:d,index,handle:'move'};});if(best.index===undefined)return;model.target=layout.strips[best.index].segment;
+	if(model.editing){drag={...best,point:p,path:structuredClone(layout.strips[best.index])};canvas.setPointerCapture(event.pointerId);}render();draw();
+};
+ui('scene').onpointermove=event=>{if(!drag||!model.editing||!model.online)return;const p=point(event),bounds=sceneGeometry(),movement=Math.hypot((p[0]-drag.point[0])*bounds.width/bounds.scaleX,(p[1]-drag.point[1])*bounds.height/bounds.scaleY);if(movement<3&&!drag.moved)return;drag.moved=true;const path=layoutDraft().strips[drag.index];
+	if(drag.handle==='move'){let dx=p[0]-drag.point[0],dy=p[1]-drag.point[1];dx=clamp(dx,-Math.min(drag.path.a[0],drag.path.b[0]),1-Math.max(drag.path.a[0],drag.path.b[0]));dy=clamp(dy,-Math.min(drag.path.a[1],drag.path.b[1]),1-Math.max(drag.path.a[1],drag.path.b[1]));for(const key of ['a','b'])path[key]=[drag.path[key][0]+dx,drag.path[key][1]+dy];}else path[drag.handle]=p.map(v=>clamp(v,0,1));layoutChanged();
+};ui('scene').onpointerup=ui('scene').onpointercancel=()=>drag=null;
 function connectSocket(){if(socket)socket.close();const url=new URL(getURL('/ws'),location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';socket=new WebSocket(url);window.ws=socket;socket.binaryType='arraybuffer';socket.onopen=()=>socket.send('{"lv":true}');socket.onmessage=event=>{if(typeof event.data==='string'){try{const value=JSON.parse(event.data);if(value.info)model.info=value.info;receive(value);}catch{}return;}const bytes=new Uint8Array(event.data);if(bytes.length<5||bytes[0]!==76)return;let width,height,offset;if(bytes[1]===2){width=bytes[2];height=bytes[3];offset=4;}else if(bytes[1]===1){width=(bytes.length-2)/3;height=1;offset=2;}else return;if(!Number.isInteger(width)||!width||!height||width*height>4096||bytes.length<offset+width*height*3||bytes.length>4+4096*3)return;model.frame={width,height,data:bytes.slice(offset,offset+width*height*3)};model.lastFrame=Date.now();draw();};socket.onclose=()=>{model.frame=null;draw();clearTimeout(reconnectTimer);reconnectTimer=setTimeout(()=>{if(model.online)connectSocket();},3000);};socket.onerror=()=>socket.close();}
 async function init(){if(initializing)return;initializing=true;ui('retry').disabled=true;try{getLoc();const [state,info,effects,fxdata,palettes]=await Promise.all(['/json/state','/json/info','/json/effects','/json/fxdata','/json/palettes'].map(path=>api(path)));if(!Array.isArray(state.seg)||!state.seg.length)throw new Error('Controller has no segments');Object.assign(model,{info,effects,fxdata,palettes:palettes.map(name=>String(name).replace(/^\*\s*/,''))});connection(true);receive(state);await loadPalettes();render();setText('command-status','Ready');connectSocket();}catch(error){connection(false);showError(error);}finally{initializing=false;ui('retry').disabled=false;}}
 ui('retry').onclick=init;connection(false);init();
@@ -257,4 +325,5 @@ async function refresh(){draw();if(!model.pending&&!initializing){try{if(!model.
 refreshTimer=setTimeout(refresh,3000);
 window.addEventListener('pagehide',()=>{clearTimeout(refreshTimer);clearTimeout(reconnectTimer);if(socket){socket.onclose=null;socket.close();}});
 window.addEventListener('pageshow',event=>{if(event.persisted){init();clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,3000);}});
+window.addEventListener('resize',()=>{draw();if(ui('sheet').open&&ui('sheet').sheetAnchor)placeSheet(ui('sheet').sheetAnchor);});
 // AI: end
