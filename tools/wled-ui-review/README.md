@@ -1,5 +1,34 @@
 # Local Canvas review
 
+## Functional dark UI
+
+The production page is `/control`. These two development servers use only Node
+built-ins and bind to loopback:
+
+```sh
+# Controller fixture; no hardware requests or writes.
+node tools/wled-ui-review/device-server.mjs
+# http://localhost:8096/control
+
+# Actual device controls through an already established loopback tunnel.
+# Pass that tunnel's local port explicitly.
+node tools/wled-ui-review/live-server.mjs 18086
+# http://localhost:8097/control
+```
+
+The live server serves the new UI assets from this checkout and forwards the
+remaining HTTP/WebSocket requests to the supplied tunnel. Opening the page reads
+state; using its controls changes the actual device. Native settings pages come
+from the connected device. Neither server flashes firmware.
+
+The fixture marks itself as simulated, supplies synthetic live pixels and
+implements state/preset/playlist requests for development. Its settings pages
+are form/navigation fixtures, not a complete firmware configuration emulator.
+`/__sim` can inject offline responses, rejected commands or acknowledged no-ops.
+See `docs/control-ui.md` for production scope and qualification.
+
+## Earlier design prototype
+
 Development-only Agentation setup for the static WLED prototype. It does not
 modify the firmware build, contact the controller, or register global MCP servers.
 

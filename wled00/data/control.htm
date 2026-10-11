@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+	<meta name="theme-color" content="#141519">
+	<title>WLED · Canvas</title>
+	<link rel="stylesheet" href="control.css">
+	<script src="common.js"></script>
+</head>
+<body>
+	<main class="window" aria-label="WLED controller">
+		<header class="topbar"><div class="identity"><span class="device-mark">✦</span><div><h1 id="device-name">WLED</h1><span id="connection">Connecting…</span></div></div><div class="top-actions"><button id="presets-button">Presets</button><button id="settings-button" aria-label="Settings">⚙</button><button id="info-button" aria-label="Device information">ⓘ</button></div></header>
+		<div class="workspace">
+			<section class="stage"><div class="stage-toolbar"><div class="segmented"><button id="scene-tab" aria-pressed="true">Scene</button><button id="strips-tab" aria-pressed="false">Strips</button></div><div class="stage-actions"><button id="paths-button" aria-pressed="true">Paths</button><button id="layout-button">Layout</button></div></div>
+				<div class="artboard"><canvas id="scene" width="960" height="600" aria-label="Live controller scene and strip paths"></canvas><span id="frame-status">Waiting for controller</span></div>
+				<div id="strip-dock" class="strip-dock" aria-label="Select a strip"></div>
+				<div class="stage-caption"><span id="scene-caption">Pixels come from the controller</span><label class="inline"><input type="checkbox" id="boost" checked> Preview boost</label></div>
+			</section>
+			<section class="inspector" aria-label="Lighting controls"><div class="inspector-heading"><button id="target-button" class="target">Scene <span>⌄</span></button><button id="power" class="power" aria-label="Power" aria-pressed="false">⏻</button></div>
+				<div class="controls-scroll" id="controls-scroll"><fieldset id="lighting" disabled>
+					<label class="range-label">Brightness <output id="brightness-value">—</output><input id="brightness" type="range" min="1" max="255" value="128"></label>
+					<div class="divider"></div><div class="label-row"><span>Color</span><div class="color-slots" id="color-slots"><button data-color="0" aria-label="Primary color" aria-pressed="true"></button><button data-color="1" aria-label="Secondary color" aria-pressed="false"></button><button data-color="2" aria-label="Third color" aria-pressed="false"></button></div></div>
+					<div class="color-row"><input id="color" type="color" value="#e5ae9c" aria-label="Selected color"><input id="hex" maxlength="7" pattern="#[0-9a-fA-F]{6}" aria-label="Hex color" value="#e5ae9c"><button id="swap" aria-label="Swap primary and secondary colors">⇄</button></div>
+					<label id="white-label" class="range-label">White <output id="white-value">—</output><input id="white" type="range" min="0" max="255"></label><label id="cct-label" class="range-label">Color temperature <output id="cct-value">—</output><input id="cct" type="range" min="0" max="255"></label>
+					<div class="divider"></div><button id="effect-button" class="selector"><span class="selector-label">Effect</span><span id="effect-name">—</span><span id="effect-preview" class="thumbnail"></span><span>⌄</span></button><button id="palette-button" class="selector"><span class="selector-label">Palette</span><span id="palette-name">—</span><span id="palette-preview" class="thumbnail"></span><span>⌄</span></button>
+					<div id="parameters"></div><div class="divider"></div><button id="follow-scene-button" class="full-row" hidden>Follow scene <span>↗</span></button><button id="orientation-button" class="full-row">Scene orientation <span id="orientation-name">0°</span></button><button id="segment-button" class="full-row">Segment controls <span>↗</span></button><button id="timer-button" class="full-row">Sleep timer <span id="timer-name">Off</span></button><button id="sync-button" class="full-row" aria-pressed="false">Sync send <span id="sync-name">Off</span></button><button id="transition-button" class="full-row">Transition <span id="transition-name">—</span></button><button id="realtime-button" class="full-row">Realtime override <span id="realtime-name">—</span></button>
+				</fieldset></div><footer class="inspector-footer"><span id="command-status" role="status" aria-live="polite">Read-only until connected</span><button id="retry" hidden>Reconnect</button></footer>
+			</section>
+		</div>
+	</main>
+	<dialog id="sheet" aria-labelledby="sheet-title"><div class="sheet-header"><button id="sheet-back" aria-label="Back" hidden>‹</button><h2 id="sheet-title"></h2><button id="sheet-close" aria-label="Close">×</button></div><div id="sheet-body" class="sheet-body"></div></dialog>
+	<script src="control-previews.js"></script>
+	<script src="control.js"></script>
+</body>
+</html>
