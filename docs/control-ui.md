@@ -124,6 +124,48 @@ upload were performed during this pass. The compressed control page is 34,640
 bytes. Asset generation, all 19 existing Node tests and ESP32/Office C3 firmware
 compilation passed after the final source changes.
 
+## Atmospheric background and glass materials
+
+The next local iteration adds a static midnight, teal, violet and warm rose
+background with broad light ribbons. Translucent window materials transmit
+that atmosphere; brighter optical edges, asymmetric inset highlights and
+luminous Power/Save actions emphasize the functional surfaces. Popups blur
+underlying content with a thicker dark fill, while fields and inner lists keep
+stable reading contrast. The canvas retains its original frame construction,
+opaque controller pixels, dimensions and pointer mapping. Decoration stays in
+noninteractive page pseudo-elements and is never painted into controller frames.
+
+This is an original CSS approximation of [Apple's Liquid Glass material
+guidance](https://developer.apple.com/design/human-interface-guidelines/materials).
+It adds no images, fonts, dependencies, continuous animation or pointer-tracking
+scripts. Standard and Safari-prefixed backdrop filtering share opaque fallbacks.
+Reduced transparency hides the light ribbons and removes blur; increased
+contrast supplies opaque reading surfaces and stronger boundaries. Existing
+reduced-motion behavior remains intact. The only JavaScript change assigns
+swatch backgroundColor instead of the background shorthand, preserving the
+padding-box clip inside each unchanged 44-pixel phone hit target.
+
+Independent visual review passed main, Saved looks, Effects and Save forms at
+1080 × 760, 390 × 844 and 320 × 568. The 1440 × 900 desktop check retains the
+1048 × 724 window. No document overflow, picker-item overflow or wrapped footer
+was found. Source review found no unresolved P0/P1/P2 issues and verified pointer
+routing, native modal bounds and color clipping. The exact reduced-transparency,
+contrast and unsupported-blur declarations were exercised in a temporary review
+stylesheet; this checks their cascade without claiming native OS preference
+emulation or a Safari run.
+
+All 45 frozen-source interaction assertions passed: pointer routing, brightness,
+color and effect parameter commits/readback, keyboard picker selection/focus,
+Save disclosures and fixed actions, native form focus/Back, and bounded mobile
+scrolling. Simulator state and preset contents were restored exactly afterward.
+
+Read-only Office checks confirmed 220 effects, 72 palettes, live frames and
+native UI settings/Back focus. Its current lighting state, complete configuration
+and presets matched a fresh private snapshot after review; driver errors stayed
+zero. No firmware was uploaded. The compressed control page is 35,456 bytes.
+Asset generation, all 19 existing Node tests and ESP32/Office C3 compilation
+passed after the final source changes.
+
 ## Apple-inspired refinement qualification
 
 Three agents independently researched Apple's primary design guidance, reviewed

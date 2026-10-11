@@ -116,7 +116,7 @@ function render() {
 	const channels=seg.col?.[model.color]||[0,0,0,0];value('color',colorHex(channels));value('hex',colorHex(channels).toUpperCase());
 	ui('color').disabled=!(seg.lc&1);ui('hex').disabled=!(seg.lc&1);ui('white-label').hidden=!(seg.lc&2);ui('cct-label').hidden=!(seg.lc&4);
 	value('white',channels[3]||0);setText('white-value',percent(ui('white').value));value('cct',seg.cct??127);setText('cct-value',percent(seg.cct??127));
-	ui('color-slots').querySelectorAll('button').forEach((item,index)=>{item.style.background=colorHex(seg.col?.[index]||[0,0,0]);item.setAttribute('aria-pressed',String(index===model.color));});
+	ui('color-slots').querySelectorAll('button').forEach((item,index)=>{item.style.backgroundColor=colorHex(seg.col?.[index]||[0,0,0]);item.setAttribute('aria-pressed',String(index===model.color));});
 	setText('effect-name',model.effects[seg.fx]||`Effect ${seg.fx}`);setText('palette-name',model.palettes[seg.pal]||`Custom palette ${seg.pal}`);
 	ui('effect-preview').replaceWith(Object.assign(effectThumb(seg.fx),{id:'effect-preview'}));ui('palette-preview').replaceWith(Object.assign(paletteThumb(seg.pal),{id:'palette-preview'}));
 	ui('palette-button').disabled=!model.palettes.length||!(seg.lc&1);renderParameters(seg);
