@@ -45,3 +45,31 @@ replace the visible scene caption with an info button. The captured session is
 in `agentation-review.json`. The remaining designs stay available for comparison.
 Production implementation and qualification remain separate, and main still
 requires Steven's approval after that testing.
+
+Canvas's effect thumbnails use the actual reference animations linked from
+[WLED's effect documentation](https://kno.wled.ge/features/effects/). They keep
+the published reference colors, generally Party, rather than simulating the
+currently selected palette or speed. Solid uses the selected primary color.
+The picker animates the hovered/focused effect; the selected effect also animates.
+Reduced motion uses still frames. All assets are embedded, with no runtime
+network requests for images. The upstream MIT notice is retained in
+`WLED-Utils-LICENSE.txt` and the embedded data.
+
+The 72 built-in palette previews are extracted from this checkout's
+`palettes.cpp` and `JSON_palette_names`, following `/json/palx` and
+`genPalPrevCss`. Color-derived palettes use the preview's primary color and
+black secondary/tertiary defaults. Random Cycle shows a stable random sample.
+Default follows the effect's default palette. Custom/device-specific palettes
+require a reachable controller. The scene is still a local design simulation.
+
+To rebuild the embedded reference data and Canvas preview code, use Python with
+Pillow installed in a development environment:
+
+```sh
+python build-reference-previews.py
+```
+
+The builder pins the upstream animation commit, records original GIF checksums,
+keeps the complete frame without cropping, and preserves elapsed loop time
+while sampling every third frame. It updates `reference-previews.json` and the
+self-contained gallery, leaving the other design definitions unchanged.

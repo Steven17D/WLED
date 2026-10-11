@@ -146,3 +146,43 @@ reachable White slider, bounded strip selector and settings sheet. Screenshots
 were inspected at 1280px, 728px, 360px and compact phone width; inline previews
 reported no errors. No production assets or firmware were changed. Main remains
 pending Steven's approval after implementation and testing.
+
+## Round 6: contained swatch ring and source-backed previews
+
+Steven's screenshot showed the selected color ring clipped at the inner
+scroller's left edge. Its two-pixel outline extended beyond the button's box.
+Canvas now draws the selection ring and white gap inside the button, so it
+remains complete without widening the control column.
+
+The generic pastel thumbnails are replaced with 26 actual WLED effect
+references, including the published animations linked by WLED's documentation.
+Solid follows the selected primary color. All 72 built-in palette ramps use
+the RGB/index data from this checkout, including color-derived palettes and
+effect defaults. The sample catalog's invented Noise/Ocean effect names are
+corrected to Fill Noise/Palette, and invented palette entries are replaced with
+the real catalog. The comparison host normalizes unsupported selections when
+returning to the earlier design catalogs; their definitions remain unchanged.
+
+Reference effects keep their recorded reference colors and timing. They do not
+compute the selected effect/palette/speed combination. Hover or keyboard focus
+animates picker previews; the selected effect also animates. Reduced motion uses
+stills. Palette selection also recolors the synthetic scene; black palette
+entries emit no glow. The info sheet states the reference/simulation boundary.
+Read-only attempts at `office.local` and the previously recorded controller IP
+failed, so custom/live device data is not presented as available.
+
+The data builder, provenance, pinned upstream animation commit, original GIF
+checksums and retained MIT notice are in `tools/wled-ui-review`. Images and
+palette data are embedded in the gallery, so it remains self-contained and makes
+no image/controller requests at runtime.
+
+Validation: 18 browser checks covered the unclipped ring, image decoding,
+distinct previews, hover animation, source Ocean colors, selection and redraw,
+Solid/primary-color updates, info disclosure and request isolation. Another 101
+checks exercised every effect and palette plus simulated reduced-motion change
+events. Native Enter selected the focused Aurora option. Phone/desktop checks
+at 320x568, 390x844 and 728x700 verified fixed bounds, complete ring, reachable
+White, bounded palette menu, scrolling list and selection. All 26 effect IDs
+were independently matched against firmware descriptors and FX.h. The outline
+extended beyond the clipping edge before the fix; its new ring stays inside.
+No new automated test files or production assets were changed.
