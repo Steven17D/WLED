@@ -90,6 +90,40 @@ Office qualification also uses the existing private `office_c3_canvas` override
 and installed PlatformIO core/toolchain. This UI change does not alter the
 output driver or canvas firmware implementation.
 
+## Second local polish pass
+
+Saved looks uses plain rows with effect or playlist metadata, a reserved Edit
+action and fixed creation actions. Create/edit forms focus Name first; More
+options and Stored command disclose secondary fields. Playlist steps use one
+continuous form with accessible reorder actions. Settings groups the existing
+destinations under Lighting, Connections and System. Effects and palettes
+reveal the current selection on opening, with target context, a result count,
+an explicit Clear search action and a designed empty state.
+
+Closing or changing a sheet invalidates its pending navigation and focus
+callbacks. Authorized writes still finish and confirm their controller state,
+while delayed results cannot reopen a dismissed editor or place an error in a
+different menu. Refresh, Save and Delete prevent duplicate pending actions.
+Active ad hoc playlists with native ID 0 retain a reachable Stop action.
+
+Three independent reviews passed after the final fixes. The interaction review
+passed 59 checks, covering the three reproduced pre-fix issues (hidden current
+picker selection, late library reads replacing Settings, and long preset names
+displacing Edit), preset/playlist CRUD, timing and reorder payloads, focus,
+delayed success/error guards and all 12 native settings Back paths. Temporary
+simulator changes were removed and its initial state and presets matched
+exactly. Visual checks at 1080 × 760, 390 × 844 and 320 × 568 found no horizontal
+overflow or wrapped action footer, including expanded options and stored JSON.
+Final code review found no unresolved P0/P1/P2 findings.
+
+Read-only Office qualification connected to 220 effects, 72 palettes and live
+frames, opened its native UI settings form, and restored focus on Back. A fresh
+private snapshot of the current device state, configuration and presets matched
+after these checks; driver errors remained zero. No device writes or firmware
+upload were performed during this pass. The compressed control page is 34,640
+bytes. Asset generation, all 19 existing Node tests and ESP32/Office C3 firmware
+compilation passed after the final source changes.
+
 ## Apple-inspired refinement qualification
 
 Three agents independently researched Apple's primary design guidance, reviewed

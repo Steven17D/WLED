@@ -5,7 +5,7 @@ const ui = id => document.getElementById(id);
 const model = {state:null,info:null,effects:[],fxdata:[],palettes:[],palx:{},presets:{},target:null,color:0,online:false,pending:0,view:'scene',paths:true,draft:null,editing:false,frame:null,lastFrame:0};
 const stripColors = ['#e9b28e','#83bca7','#87acdf','#bb9cdc'];
 const frameCanvas=document.createElement('canvas'),frameContext=frameCanvas.getContext('2d');
-let commandQueue = Promise.resolve(), reconnectTimer, refreshTimer, socket, drag, initializing=false, sheetCleanup, sheetOpener;
+let commandQueue = Promise.resolve(), reconnectTimer, refreshTimer, socket, drag, initializing=false, sheetCleanup, sheetOpener, sheetVersion=0, presetReadVersion=0, presetBookmark=null, settingsBookmark=null;
 const wait = milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds));
 const clamp = (value,min=0,max=255) => Math.max(min,Math.min(max,Number(value)));
 const percent = value => `${Math.round(value/255*100)}%`;
@@ -15,15 +15,19 @@ const nameOf = item => item?.n || (model.state?.canvas?.enabled && item?.id===mo
 const setText = (id,text) => {ui(id).textContent=text;};
 const setPressed = (id,value) => ui(id).setAttribute('aria-pressed',String(!!value));
 function node(tag,text,className) {const element=document.createElement(tag);if(text!==undefined)element.textContent=text;if(className)element.className=className;return element;}
+// Original line icons share one sprite; user and controller strings remain text nodes.
+function icon(id,className='') {const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS('http://www.w3.org/2000/svg','use');svg.setAttribute('class','icon '+className);svg.setAttribute('aria-hidden','true');use.setAttribute('href','#icon-'+id);svg.append(use);return svg;}
+// Native disclosures keep optional fields keyboard-accessible inside the one scrolling form.
+function disclosure(title,...children) {const details=node('details',undefined,'form-disclosure'),summary=node('summary',title);summary.append(icon('chevron'));details.append(summary,...children);return details;}
 function button(text,action,className) {const element=node('button',text,className);element.type='button';element.onclick=action;return element;}
 function note(text) {return node('p',text,'muted');}
 function label(text,control) {const element=node('label',text);element.append(control);return element;}
 function input(type,value,min,max) {const element=node('input');element.type=type;if(min!==undefined)element.min=min;if(max!==undefined)element.max=max;element.value=value??'';return element;}
 function select(options,value) {const element=node('select');for(const [id,text] of options){const option=node('option',text);option.value=id;element.append(option);}element.value=value;return element;}
 function checkbox(text,checked) {const element=input('checkbox');element.checked=!!checked;const wrapper=label(text,element);wrapper.className='check-row';wrapper.prepend(element);return {element,wrapper};}
-function showError(error) {setText('command-status',error.message||String(error));ui('command-status').dataset.state='error';const existing=ui('sheet-body').querySelector('.error');existing?.remove();if(ui('sheet').open){const message=node('p',error.message||String(error),'error');message.setAttribute('role','alert');ui('sheet-body').prepend(message);}}
+function showError(error,insideSheet=true) {setText('command-status',error.message||String(error));ui('command-status').dataset.state='error';if(insideSheet&&ui('sheet').open){ui('sheet-body').querySelector('.error')?.remove();const message=node('p',error.message||String(error),'error');message.setAttribute('role','alert');ui('sheet-body').prepend(message);}}
 // Keep native range semantics while exposing the filled track to the visual layer.
-function rangeProgress(control) {const min=Number(control.min)||0,max=Number(control.max)||100;control.style.setProperty('--progress',`${(Number(control.value)-min)/Math.max(1,max-min)*100}%`);}
+function rangeProgress(control) {const min=Number(control.min)||0,max=Number(control.max)||100;control.style.setProperty('--progress',`${(Number(control.value)-min)/Math.max(1,max-min)*100}%`);if(['brightness','white','cct'].includes(control.id)){control.setAttribute('aria-valuetext',percent(control.value));control.title=percent(control.value)+' · '+control.value+'/255';}}
 // Bound every request; an interrupted connection never becomes a successful local edit.
 async function api(path,body) {
 	const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),8000);
@@ -54,7 +58,7 @@ function applied(next,requested) {
 }
 // Serialize mutations and read back queued canvas/preset changes before acknowledging them.
 function send(body,description='Saved on controller',verify,verifyFields=true) {
-	const requested=structuredClone(body),origin=document.activeElement;model.pending++;connection(model.online);setText('command-status','Applying…');ui('command-status').dataset.state='busy';
+	const requested=structuredClone(body),origin=document.activeElement,viewVersion=sheetVersion;model.pending++;connection(model.online);setText('command-status','Applying…');ui('command-status').dataset.state='busy';
 	const operation=commandQueue.then(async()=>{
 		if(!model.online)throw new Error('Controller is offline');
 		await api('/json/state',{...requested,v:true});
@@ -71,17 +75,17 @@ function send(body,description='Saved on controller',verify,verifyFields=true) {
 		throw new Error('Controller did not confirm the change');
 	});
 	commandQueue=operation.catch(()=>{});
-	return operation.catch(error=>{showError(error);throw error;}).finally(()=>{model.pending--;if(!model.pending){render();if(!ui('sheet').open&&document.activeElement===document.body&&origin?.isConnected&&!origin.matches(':disabled'))origin.focus({preventScroll:true});}});
+	return operation.catch(error=>{showError(error,sheetVersion===viewVersion);throw error;}).finally(()=>{model.pending--;if(!model.pending){render();if(!ui('sheet').open&&document.activeElement===document.body&&origin?.isConnected&&!origin.matches(':disabled'))origin.focus({preventScroll:true});}});
 }
 function change(body,description,verify) {send(body,description,verify).catch(()=>{});}
 function changeSegment(values,description) {const id=segment()?.id;if(id!==undefined)change({seg:[{id,...values}]},description);}
 // One dialog hosts menus and forms. Cleanup restores borrowed controls before any navigation.
-function clearSheet() {if(ui('sheet').sheetAnchor)ui('sheet').sheetAnchor.setAttribute('aria-expanded','false');const native=!!ui('sheet-body').querySelector('iframe');if(sheetCleanup){const cleanup=sheetCleanup;sheetCleanup=null;cleanup();}ui('sheet').querySelector(':scope > .sheet-actions')?.remove();ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();}
+function clearSheet() {sheetVersion++;if(ui('sheet').sheetAnchor)ui('sheet').sheetAnchor.setAttribute('aria-expanded','false');const native=!!ui('sheet-body').querySelector('iframe');if(sheetCleanup){const cleanup=sheetCleanup;sheetCleanup=null;cleanup();}ui('sheet').querySelector(':scope > .sheet-actions')?.remove();ui('sheet-body').replaceChildren();resumePreview();if(native)refreshPalettes();}
 function placeSheet(anchor) {const dialog=ui('sheet');if(!anchor){for(const key of ['--sheet-left','--sheet-top','--sheet-width'])dialog.style.removeProperty(key);return;}const rect=anchor.getBoundingClientRect(),width=Math.min(380,innerWidth-32),height=Math.min(dialog.getBoundingClientRect().height||500,innerHeight-32),beside=anchor.closest('.inspector')&&rect.left-width-12>=16,left=clamp(beside?rect.left-width-12:rect.right-width,16,innerWidth-width-16),top=clamp(beside?rect.top-24:rect.bottom+10,16,Math.max(16,innerHeight-height-16));dialog.style.setProperty('--sheet-width',width+'px');dialog.style.setProperty('--sheet-left',left+'px');dialog.style.setProperty('--sheet-top',top+'px');}
 function openSheet(title,back,options={}) {
 	const dialog=ui('sheet'),wasOpen=dialog.open;if(!back&&wasOpen&&dialog.dataset.kind==='advanced')back=advancedSheet;
 	if(!wasOpen)sheetOpener=options.anchor||document.activeElement;
-	clearSheet();ui('sheet-title').textContent=title;ui('sheet-body').className='sheet-body';dialog.dataset.presentation=options.anchor?'popover':'sheet';dialog.dataset.kind=options.kind||'form';dialog.sheetAnchor=options.anchor||null;if(options.anchor){options.anchor.setAttribute('aria-haspopup','dialog');options.anchor.setAttribute('aria-expanded','true');}placeSheet(options.anchor);ui('sheet-back').hidden=!back;ui('sheet-back').onclick=back||null;if(!wasOpen)dialog.showModal();requestAnimationFrame(()=>{if(dialog.open&&dialog.sheetAnchor===options.anchor)placeSheet(options.anchor);});return ui('sheet-body');
+	clearSheet();const version=sheetVersion;ui('sheet-title').textContent=title;ui('sheet-body').className='sheet-body';dialog.dataset.presentation=options.anchor?'popover':'sheet';dialog.dataset.kind=options.kind||'form';dialog.sheetAnchor=options.anchor||null;if(options.anchor){options.anchor.setAttribute('aria-haspopup','dialog');options.anchor.setAttribute('aria-expanded','true');}placeSheet(options.anchor);ui('sheet-back').hidden=!back;ui('sheet-back').onclick=back||null;if(!wasOpen)dialog.showModal();requestAnimationFrame(()=>{if(!dialog.open||sheetVersion!==version)return;if(dialog.sheetAnchor)placeSheet(dialog.sheetAnchor);if(!dialog.contains(document.activeElement))(dialog.querySelector('.sheet-body input:enabled:not([type=hidden]), .sheet-body select:enabled, .sheet-body button:enabled')||ui('sheet-close')).focus({preventScroll:true});});return ui('sheet-body');
 }
 // Actions remain reachable while only the form content scrolls.
 function sheetActions(...actions) {const footer=node('div',undefined,'sheet-actions');footer.append(...actions);ui('sheet').append(footer);return footer;}
@@ -146,12 +150,20 @@ function renderParameters(seg) {
 // Browse verified reference frames and controller palette stops without exposing technical IDs as choices.
 function pick(kind) {
 	const anchor=ui(kind==='fx'?'effect-button':'palette-button'),body=openSheet(kind==='fx'?'Effects':'Palettes',null,{anchor,kind:kind==='fx'?'effects':'palettes'});body.classList.add('picker-body');
-	const search=input('search','');search.placeholder='Search '+(kind==='fx'?'effects':'palettes');search.setAttribute('aria-label',search.placeholder);const searchRow=node('div',undefined,'search');searchRow.append(search);body.append(searchRow);
+	const search=input('search','');search.placeholder='Search '+(kind==='fx'?'effects':'palettes');search.setAttribute('aria-label',search.placeholder);
+	const clear=button('',()=>{search.value='';fill(true);search.focus({preventScroll:true});},'search-clear');clear.setAttribute('aria-label','Clear search');clear.append(icon('close'));clear.hidden=true;
+	const searchRow=node('div',undefined,'search');searchRow.append(icon('search','search-icon'),search,clear);body.append(searchRow);
+	const context=node('div',undefined,'picker-context'),count=node('span');count.setAttribute('aria-live','polite');context.append(node('span',nameOf(segment()),'picker-target'),count);body.append(context);
 	const list=node('div',undefined,'picker-list picker-grid '+(kind==='fx'?'effect-grid':'palette-grid'));body.append(list);
 	body.append(note(kind==='fx'?'Reference frames · Live output appears in your scene.':'Controller palettes · Current colors update live.'));
 	const entries=kind==='fx'?model.effects.map((name,id)=>[id,name]):[...model.palettes.map((name,id)=>[id,name]),...Object.keys(model.palx).map(Number).filter(id=>id>=model.palettes.length).map(id=>[id,`Custom palette ${id}`])];
-	function fill(){list.replaceChildren();entries.filter(([,name])=>name.toLowerCase().includes(search.value.trim().toLowerCase())).forEach(([id,name])=>{const selected=id===segment()?.[kind],item=button('',()=>{closeSheet();changeSegment({[kind]:id,...(kind==='fx'?{fxdef:true}:{})});},'picker-item');item.setAttribute('aria-label',name);item.setAttribute('aria-pressed',String(selected));item.dataset.id=id;item.title=name+' · '+(kind==='fx'?'Effect ':'Palette ')+id;const mark=node('span',selected?'✓':'','selected-mark');mark.setAttribute('aria-hidden','true');item.append(kind==='fx'?effectThumb(id):paletteThumb(id),node('span',name,'item-name'),mark);list.append(item);});if(!list.children.length)list.append(note('No matches. Try another name.'));}
-	search.oninput=fill;fill();search.focus();
+	// Scroll only the result region; search focus and the static outer window stay in place.
+	function revealCurrent(){const selected=list.querySelector('[aria-pressed=true]');if(!selected||!list.isConnected)return;const row=selected.getBoundingClientRect(),bounds=list.getBoundingClientRect();list.scrollTop+=row.top-bounds.top-(list.clientHeight-row.height)/2;}
+	function fill(reveal=false){const matches=entries.filter(([,name])=>name.toLowerCase().includes(search.value.trim().toLowerCase()));list.replaceChildren();count.textContent=matches.length+' '+(kind==='fx'?'effects':'palettes');clear.hidden=!search.value;
+		matches.forEach(([id,name])=>{const selected=id===segment()?.[kind],item=button('',()=>{closeSheet();changeSegment({[kind]:id,...(kind==='fx'?{fxdef:true}:{})});},'picker-item');item.setAttribute('aria-label',name);item.setAttribute('aria-pressed',String(selected));item.dataset.id=id;item.title=name+' · '+(kind==='fx'?'Effect ':'Palette ')+id;const mark=node('span',selected?'✓':'','selected-mark');mark.setAttribute('aria-hidden','true');item.append(kind==='fx'?effectThumb(id):paletteThumb(id),node('span',name,'item-name'),mark);list.append(item);});
+		if(!matches.length){const empty=node('div',undefined,'empty-state');empty.append(icon('search'),node('p','No matches'),note('Try another name or clear the search.'));list.append(empty);}list.scrollTop=0;if(reveal)revealCurrent();
+	}
+	search.oninput=()=>fill(!search.value.trim());search.addEventListener('search',()=>fill(!search.value.trim()));fill();search.focus({preventScroll:true});requestAnimationFrame(revealCurrent);
 }
 ui('effect-button').onclick=()=>pick('fx');ui('palette-button').onclick=()=>pick('pal');
 ui('target-button').onclick=()=>{const body=openSheet('Adjust',null,{anchor:ui('target-button'),kind:'target'});for(const item of model.state.seg){const row=button('',()=>{model.target=item.id;render();closeSheet();draw();},'menu-row');row.append(node('span',nameOf(item),'item-name'),node('small',item.id===model.target?'✓':String(item.id)));body.append(row);}body.append(button('All selected segments',()=>{const body=openSheet('Selected segments');body.append(note('Color and effect controls target the segment shown in the inspector. These switches set WLED’s selected-segment group for presets and API commands.'));for(const item of model.state.seg){const c=checkbox(nameOf(item),item.sel);c.element.onchange=()=>change({seg:[{id:item.id,sel:c.element.checked}]});body.append(c.wrapper);}},'full-row'));};
@@ -187,32 +199,51 @@ if(ui('advanced-button'))ui('advanced-button').onclick=advancedSheet;
 async function loadPalettes() {
 	let pages=1;const data={};for(let page=0;page<pages;page++){if(page)await wait(75);const value=await api('/json/palx?page='+page);pages=Math.min(64,(value.m??0)+1);Object.assign(data,value.p||{});}model.palx=data;
 }
-async function loadPresets() {model.presets=await api('/presets.json');return model.presets;}
+// Only the newest library read updates cached presets; older responses cannot replace it.
+async function loadPresets() {const version=++presetReadVersion,value=await api('/presets.json');if(version===presetReadVersion)model.presets=value;return value;}
 function presetEntries() {return Object.entries(model.presets).filter(([id,value])=>Number(id)>0&&Number(id)<=250&&value&&typeof value==='object');}
+// Saved looks lead with their names and source metadata, with creation kept in a fixed footer.
 function presetSheet() {
-	const body=openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'});body.append(note('Stored on your WLED controller. Playlists carry their own timing and transitions.'));const actions=node('div',undefined,'row');actions.append(button('Save current look',()=>editPreset()),button('New playlist',()=>editPreset(null,true)),button('Stop playlist',()=>change({playlist:{}})));body.append(actions);
-	for(const [id,preset] of presetEntries()){const row=node('div',undefined,'row preset-row');const apply=button(`${preset.n||'Preset '+id}${preset.playlist?' ▶':''}`,()=>{closeSheet();change({ps:Number(id),...(preset.playlist?{on:true}:{})},'Preset applied');},'menu-row');apply.style.flex='1';row.append(apply,button('Edit',()=>editPreset(Number(id),!!preset.playlist)));body.append(row);}if(!presetEntries().length)body.append(note('No presets saved yet.'));
-	body.append(button('Refresh',async()=>{try{await loadPresets();presetSheet();}catch(error){showError(error);}}));
+	const body=openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'});body.classList.add('library-body');const version=sheetVersion,entries=presetEntries(),list=node('div',undefined,'preset-list');body.append(node('p','Saved on '+(model.info?.name||'your controller'),'library-context'),list);
+	const remember=key=>presetBookmark={scroll:body.scrollTop,key};
+	for(const [id,preset] of entries){const title=preset.n||'Preset '+id,active=Number(id)===(Number.isInteger(model.state.pl)&&model.state.pl>=0?model.state.pl:model.state.ps),row=node('div',undefined,'preset-row');
+		const apply=button('',()=>{closeSheet();change({ps:Number(id),...(preset.playlist?{on:true}:{})},'Preset applied');},'preset-apply');apply.setAttribute('aria-label','Apply '+title);apply.setAttribute('aria-pressed',String(active));apply.title=title;
+		const badge=node('span',undefined,'preset-symbol');badge.append(icon(preset.playlist?'play':'light'));const copy=node('span',undefined,'preset-copy'),name=node('span',title,'preset-name'),first=preset.seg?.[0];
+		const description=preset.playlist?'Playlist · '+(Array.isArray(preset.playlist.ps)?preset.playlist.ps.length:0)+' looks':model.effects[first?.fx]||'Lighting preset';copy.append(name,node('small',description,'preset-description'));
+		const mark=node('span',active?'✓':'','preset-current');mark.setAttribute('aria-hidden','true');apply.append(badge,copy,mark);
+		const edit=button('',()=>{remember('edit-'+id);editPreset(Number(id),!!preset.playlist);},'preset-edit icon-button');edit.append(icon('adjust'));edit.setAttribute('aria-label','Edit '+title);edit.title='Edit '+title;edit.dataset.returnKey='edit-'+id;row.append(apply,edit);list.append(row);
+	}
+	if(!entries.length){const empty=node('div',undefined,'empty-state');empty.append(icon('presets'),node('p','Your first look starts here'),note('Save the current lighting to return to it later.'));list.append(empty);}
+	if(Number.isInteger(model.state.pl)&&model.state.pl>=0){const playing=node('div',undefined,'playlist-playing'),stop=button('Stop',async()=>{if(stop.disabled)return;stop.disabled=true;try{await send({playlist:{}},'Playlist stopped');if(ui('sheet').open&&sheetVersion===version)presetSheet();}catch(error){showError(error,sheetVersion===version);}finally{if(stop.isConnected)stop.disabled=false;}});playing.append(node('span','Playlist playing'),stop);body.append(playing);}
+	const refresh=button('Refresh',async()=>{if(refresh.disabled)return;refresh.disabled=true;const bookmark=body.scrollTop;try{await loadPresets();if(ui('sheet').open&&sheetVersion===version){presetBookmark={scroll:bookmark,key:'refresh'};presetSheet();}}catch(error){if(ui('sheet').open&&sheetVersion===version)showError(error);}finally{if(refresh.isConnected)refresh.disabled=false;}},'library-refresh');refresh.prepend(icon('refresh'));refresh.dataset.returnKey='refresh';body.append(refresh);
+	const save=button('Save look',()=>{remember('save');editPreset();},'primary'),playlist=button('New playlist',()=>{remember('playlist');editPreset(null,true);});save.prepend(icon('plus'));save.dataset.returnKey='save';save.setAttribute('aria-label','Save current look');playlist.dataset.returnKey='playlist';sheetActions(save,playlist);
+	const bookmark=presetBookmark;if(bookmark)requestAnimationFrame(()=>{if(!ui('sheet').open||sheetVersion!==version)return;body.scrollTop=bookmark.scroll;ui('sheet').querySelector('[data-return-key="'+bookmark.key+'"]')?.focus({preventScroll:true});});
 }
-ui('presets-button').onclick=async()=>{openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'}).append(note('Loading…'));try{await loadPresets();presetSheet();}catch(error){showError(error);}};
+// A completed or failed library request belongs only to the loading view that started it.
+ui('presets-button').onclick=async()=>{presetBookmark=null;openSheet('Saved looks',null,{anchor:ui('presets-button'),kind:'presets'}).append(note('Loading saved looks…'));const version=sheetVersion;try{await loadPresets();if(ui('sheet').open&&sheetVersion===version)presetSheet();}catch(error){if(ui('sheet').open&&sheetVersion===version)showError(error);}};
 async function confirmPreset(id,expected,fields) {const matches=(actual,expected)=>Array.isArray(expected)?Array.isArray(actual)&&expected.every((value,index)=>matches(actual[index],value)):expected&&typeof expected==='object'?Object.entries(expected).every(([key,value])=>matches(actual?.[key],value)):typeof expected==='boolean'&&(actual===0||actual===1)?Boolean(actual)===expected:actual===expected;for(let attempt=0;attempt<20;attempt++){await wait(200);await loadPresets();if(expected===null?!model.presets[id]:model.presets[id]?.n===expected&&(!fields||matches(model.presets[id],fields)))return;}throw new Error('Preset file did not confirm the change');}
 function editPreset(id,playlist=false) {
-	const existing=id?model.presets[id]:null;const body=openSheet(playlist?'Playlist':id?'Edit preset':'Save current look',presetSheet);
+	const existing=id?model.presets[id]:null;const body=openSheet(playlist?'Playlist':id?'Edit preset':'Save current look',presetSheet);body.classList.add('preset-editor');const editorVersion=sheetVersion;let saving=false;
 	const used=new Set(presetEntries().map(([id])=>Number(id)));let free=1;while(used.has(free)&&free<250)free++;
 	const number=input('number',id||free,1,250),name=input('text',existing?.n||'');name.maxLength=32;const quick=input('text',existing?.ql||'');quick.maxLength=2;const includeBrightness=checkbox('Include brightness',true),bounds=checkbox('Include segment bounds',true),selected=checkbox('Selected segments only',false),boot=checkbox('Use as startup preset',false);
-	body.append(label('Preset ID',number),label('Name',name),label('Quick-load label (optional)',quick));
+	name.placeholder=playlist?'Evening sequence':'Evening lights';body.append(label('Name',name));const options=disclosure('More options',label('Preset ID',number),label('Quick-load label (optional)',quick));
 	let content,playlistValue;if(playlist){playlistValue=playlistEditor(body,existing?.playlist,id);}
-	else if(existing){content=node('textarea');const copy=structuredClone(existing);delete copy.n;delete copy.ql;content.value=JSON.stringify(copy,null,2);body.append(label('Stored preset command (JSON)',content),note('Edit the stored command, or replace it with the current controller state.'));}
-	if(!playlist){body.append(includeBrightness.wrapper,bounds.wrapper,selected.wrapper);}body.append(boot.wrapper);
+	else if(existing){content=node('textarea');const copy=structuredClone(existing);delete copy.n;delete copy.ql;content.value=JSON.stringify(copy,null,2);body.append(disclosure('Stored command',label('Preset command (JSON)',content),note('Save edits to this command, or replace it with the current look.')));}
+	if(!playlist){body.append(includeBrightness.wrapper);options.append(bounds.wrapper,selected.wrapper);}options.append(boot.wrapper);body.append(options);
 	const actions=node('div',undefined,'row');
-	async function save(useCurrent=false){try{if(!number.reportValidity())return;let payload={};if(playlist){for(const control of body.querySelectorAll('input[type=number]'))if(!control.reportValidity())return;payload={playlist:playlistValue(),on:true,o:true};}else if(content&&!useCurrent){payload=JSON.parse(content.value);if(!payload||Array.isArray(payload)||typeof payload!=='object')throw new Error('Enter a JSON object');payload.o=true;}
+	async function save(useCurrent=false){if(saving)return;saving=true;for(const item of ui('sheet').querySelectorAll('.sheet-actions button'))item.disabled=true;try{if(!number.checkValidity())options.open=true;if(!number.reportValidity())return;let payload={};if(playlist){for(const control of body.querySelectorAll('input[type=number]'))if(!control.reportValidity())return;payload={playlist:playlistValue(),on:true,o:true};}else if(content&&!useCurrent){payload=JSON.parse(content.value);if(!payload||Array.isArray(payload)||typeof payload!=='object')throw new Error('Enter a JSON object');payload.o=true;}
 		else Object.assign(payload,{ib:includeBrightness.element.checked,sb:bounds.element.checked,sc:selected.element.checked});
-		const presetId=Number(number.value),presetName=name.value||`${playlist?'Playlist':'Preset'} ${presetId}`;if(new TextEncoder().encode(presetName).length>32)throw new Error('Use a shorter name (up to 32 bytes)');if(presetId!==id&&used.has(presetId)){showError(new Error('That ID is already used. Choose a free ID or edit that preset.'));return;}
+		const presetId=Number(number.value),presetName=name.value||`${playlist?'Playlist':'Preset'} ${presetId}`;if(new TextEncoder().encode(presetName).length>32)throw new Error('Use a shorter name (up to 32 bytes)');if(presetId!==id&&used.has(presetId)){options.open=true;number.focus();showError(new Error('That ID is already used. Choose a free ID or edit that preset.'));return;}
 		const expected=payload.o?structuredClone(payload):{...(includeBrightness.element.checked?{on:model.state.on,bri:model.state.bri}:{}),seg:model.state.seg.filter(seg=>!selected.element.checked||seg.sel).map(seg=>{const look={id:seg.id,fx:seg.fx,pal:seg.pal,sx:seg.sx,ix:seg.ix};if(bounds.element.checked)Object.assign(look,{start:seg.start,stop:seg.stop});return look;})};
 		delete expected.o;if(playlist)delete expected.on;
-		Object.assign(payload,{psave:presetId,n:presetName,ql:quick.value});if(boot.element.checked)payload.bootps=presetId;await send(payload,'Saving preset…');await confirmPreset(presetId,presetName,expected);setText('command-status','Preset saved on controller');presetSheet();
-	}catch(error){showError(error);}}
-	actions.append(button('Save',()=>save(),'primary'));if(existing&&!playlist)actions.append(button('Replace with current look',()=>save(true)));if(id)actions.append(button('Delete',()=>{const body=openSheet('Delete preset',()=>editPreset(id,playlist));body.append(note(`Delete ${existing.n||'Preset '+id}?`),button('Delete',async()=>{try{await send({pdel:id},'Deleting preset…');await confirmPreset(id,null);setText('command-status','Preset deleted');presetSheet();}catch(error){showError(error);}},'danger'));},'danger'));sheetActions(...actions.children);
+		Object.assign(payload,{psave:presetId,n:presetName,ql:quick.value});if(boot.element.checked)payload.bootps=presetId;await send(payload,'Saving preset…');await confirmPreset(presetId,presetName,expected);setText('command-status','Preset saved on controller');if(ui('sheet').open&&sheetVersion===editorVersion)presetSheet();
+	}catch(error){showError(error,sheetVersion===editorVersion);}finally{saving=false;if(sheetVersion===editorVersion)for(const item of ui('sheet').querySelectorAll('.sheet-actions button'))item.disabled=false;}}
+	if(existing&&!playlist)options.append(button('Replace with current look',()=>save(true),'full-row'));if(id)options.append(button('Delete',()=>deletePresetSheet(id,existing,playlist),'full-row danger'));actions.append(button('Cancel',presetSheet),button('Save',()=>save(),'primary'));sheetActions(...actions.children);name.focus({preventScroll:true});
+}
+// Delete confirmation keeps its controls bounded and ignores navigation after submission.
+function deletePresetSheet(id,existing,playlist) {
+	const body=openSheet('Delete preset',()=>editPreset(id,playlist)),version=sheetVersion;body.append(note(`Delete ${existing.n||'Preset '+id}?`));
+	const remove=button('Delete',async()=>{if(remove.disabled)return;remove.disabled=true;try{await send({pdel:id},'Deleting preset…');await confirmPreset(id,null);setText('command-status','Preset deleted');if(ui('sheet').open&&sheetVersion===version)presetSheet();}catch(error){showError(error,sheetVersion===version);}finally{if(remove.isConnected)remove.disabled=false;}},'danger');sheetActions(button('Cancel',()=>editPreset(id,playlist)),remove);
 }
 // Editable timed rows cover native playlist ordering, shuffle, repeats and final preset.
 function playlistEditor(body,stored,id) {
@@ -221,8 +252,14 @@ function playlistEditor(body,stored,id) {
 	const at=(values,index,fallback)=>Array.isArray(values)?values[Math.min(index,values.length-1)]??fallback:values??fallback;
 	const rows=source.ps.map((preset,index)=>({preset,duration:at(source.dur,index,100)/10,transition:at(source.transition,index,7)/10}));
 	const list=node('div');body.append(list);const repeat=input('number',Math.max(0,source.repeat||0),0,254),end=select([[0,'Keep the final look'],[255,'Restore the previous preset'],...choices],source.end||0),shuffle=checkbox('Shuffle each loop',source.r||source.repeat<0);
-	function renderRows(){list.replaceChildren();rows.forEach((entry,index)=>{const box=node('div',undefined,'layout-tools'),presets=select(choices,entry.preset),duration=input('number',entry.duration,0,4294967),transition=input('number',entry.transition,0,6553.5);duration.step=.1;transition.step=.1;presets.onchange=()=>entry.preset=Number(presets.value);duration.oninput=()=>entry.duration=Number(duration.value);transition.oninput=()=>entry.transition=Number(transition.value);const timing=node('div',undefined,'row');timing.append(label('Duration · seconds',duration),label('Transition · seconds',transition));const actions=node('div',undefined,'row');actions.append(button('↑',()=>{[rows[index-1],rows[index]]=[rows[index],rows[index-1]];renderRows();}),button('↓',()=>{[rows[index+1],rows[index]]=[rows[index],rows[index+1]];renderRows();}),button('Remove',()=>{rows.splice(index,1);renderRows();}));actions.children[0].disabled=index===0;actions.children[1].disabled=index===rows.length-1;box.append(label(`Look ${index+1}`,presets),timing,actions);list.append(box,node('div',undefined,'divider'));});}
-	renderRows();body.append(button('Add look',()=>{if(!choices.length||rows.length>=100)return;rows.push({preset:choices[0][0],duration:10,transition:.7});renderRows();}),label('Repeat count · 0 keeps playing',repeat),label('When finished',end),shuffle.wrapper,note('A duration of zero holds that look until you advance the playlist.'));
+	// Flat numbered steps retain focus when a reorder or removal replaces the row controls.
+	function renderRows(focusIndex,action){list.replaceChildren();rows.forEach((entry,index)=>{const box=node('section',undefined,'playlist-step'),presets=select(choices,entry.preset),duration=input('number',entry.duration,0,4294967),transition=input('number',entry.transition,0,6553.5);duration.step=.1;transition.step=.1;presets.onchange=()=>entry.preset=Number(presets.value);duration.oninput=()=>entry.duration=Number(duration.value);transition.oninput=()=>entry.transition=Number(transition.value);
+		const heading=node('div',undefined,'playlist-step-heading'),actions=node('div',undefined,'step-actions');heading.append(node('span','Look '+(index+1),'step-title'),actions);
+		for(const [direction,disabled,offset] of [['up',index===0,-1],['down',index===rows.length-1,1]]){const move=button('',()=>{[rows[index+offset],rows[index]]=[rows[index],rows[index+offset]];renderRows(index+offset,direction);},'icon-button');move.append(icon(direction));move.setAttribute('aria-label',`Move look ${index+1} ${direction}`);move.title='Move '+direction;move.disabled=disabled;move.dataset.stepAction=direction;actions.append(move);}
+		const remove=button('Remove',()=>{rows.splice(index,1);renderRows(Math.min(index,rows.length-1),'select');},'step-remove');remove.setAttribute('aria-label','Remove look '+(index+1));actions.append(remove);const timing=node('div',undefined,'row');timing.append(label('Duration · seconds',duration),label('Transition · seconds',transition));box.append(heading,label('Saved look',presets),timing);list.append(box);
+	});if(focusIndex!==undefined){const box=list.children[focusIndex],target=action==='select'?box?.querySelector('select'):box?.querySelector(`[data-step-action=${action}]:enabled`);(target||box?.querySelector('select')||body.querySelector('.playlist-add'))?.focus({preventScroll:true});}}
+	renderRows();const add=button('Add look',()=>{if(!choices.length||rows.length>=100)return;rows.push({preset:choices[0][0],duration:10,transition:.7});renderRows(rows.length-1,'select');},'playlist-add');add.prepend(icon('plus'));body.append(add,label('Repeat count · 0 keeps playing',repeat),label('When finished',end),shuffle.wrapper,note('A duration of zero holds that look until you advance the playlist.'));
+
 	return ()=>{if(!rows.length||rows.some(row=>!Number.isInteger(row.preset)||row.preset<1||row.preset>250||!Number.isFinite(row.duration)||!Number.isFinite(row.transition)||row.transition>row.duration&&row.duration>0))throw new Error('Add a look with valid timing. Transition must fit within its duration.');return {ps:rows.map(row=>row.preset),dur:rows.map(row=>Math.round(row.duration*10)),transition:rows.map(row=>Math.round(row.transition*10)),repeat:Number(repeat.value),end:Number(end.value),r:shuffle.element.checked};};
 }
 // Explicit edit mode separates light selection from geometry changes. Only a genuine edit creates a draft.
@@ -263,7 +300,7 @@ const settingsPages=[['Outputs & hardware','/settings/leds'],['Wi-Fi & network',
 // Same-origin native forms preserve every firmware option, PIN challenge and upload handler.
 function nativeSheet(title,path) {
 	const body=openSheet(title,settingsSheet);body.classList.add('frame-body');const frame=node('iframe');frame.title=title;frame.src=getURL(path);body.append(frame);
-	frame.onload=()=>{try {const doc=frame.contentDocument;if(!doc)return;
+	frame.onload=()=>{if(!frame.isConnected||!ui('sheet').open)return;try {const doc=frame.contentDocument;if(!doc)return;
 		const style=doc.createElement('style');style.textContent=':root{color-scheme:dark!important;--c-bg:#202127;--c-fg:#f2f2f5;--c-1:#353741;--c-2:#494c58;--c-3:#78acff}html,body{background:#202127!important;color:#e5e6eb!important;font-family:-apple-system,BlinkMacSystemFont,sans-serif!important}body{padding:16px!important;margin:0!important}input,select,textarea,button{color:#e5e6eb!important;background:#16171c!important;border-radius:8px!important;border-color:#454751!important}h2{font-size:19px!important}.helpB{display:none}';doc.head.append(style);
 		// Native Back and post-save redirects remain confined to the sheet.
 		frame.contentWindow.B=settingsSheet;
@@ -272,12 +309,16 @@ function nativeSheet(title,path) {
 		if((doc.location.pathname==='/'&&path!=='/?native=1')||doc.location.pathname==='/settings'){settingsSheet();return;}
 	}catch(error){showError(new Error('Settings could not be styled; native controls remain available'));}};
 }
+// Group native destinations by task without adding another page or nested surface.
 function settingsSheet() {
-	const body=openSheet('Settings',null,{anchor:ui('settings-button'),kind:'settings'}),grid=node('div',undefined,'settings-grid');body.append(grid);
-	for(const [title,path] of settingsPages){if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>nativeSheet(title,path),'menu-row');item.append(node('span',title,'item-name'),node('small','›'));grid.append(item);}
-	body.append(button('Advanced JSON command',jsonSheet,'menu-row'),button('Classic WLED controls',()=>nativeSheet('WLED controls','/?native=1'),'menu-row'));
+	const body=openSheet('Settings',null,{anchor:ui('settings-button'),kind:'settings'});body.classList.add('settings-body');const version=sheetVersion,bookmark=settingsBookmark;
+	for(const [name,indices] of [['Lighting',[0,4,10]],['Connections',[1,2,3]],['System',[5,6,7,8,9,11]]]){const group=node('section',undefined,'settings-group');group.append(node('h3',name));
+		for(const index of indices){const [title,path]=settingsPages[index];if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};nativeSheet(title,path);},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));group.append(item);}
+		if(name==='System')for(const [title,path,action] of [['Advanced JSON command','json',jsonSheet],['Classic WLED controls','/?native=1',()=>nativeSheet('WLED controls','/?native=1')]]){const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};action();},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));group.append(item);}body.append(group);
+	}
+	if(bookmark)requestAnimationFrame(()=>{if(!ui('sheet').open||sheetVersion!==version)return;body.scrollTop=bookmark.scroll;[...body.querySelectorAll('[data-path]')].find(item=>item.dataset.path===bookmark.path)?.focus({preventScroll:true});});
 }
-ui('settings-button').onclick=settingsSheet;
+ui('settings-button').onclick=()=>{settingsBookmark=null;settingsSheet();};
 function jsonSheet(){const body=openSheet('JSON state command',settingsSheet),value=node('textarea');value.value=JSON.stringify({seg:[{id:segment()?.id??0}]},null,2);body.append(note('Send a standard WLED JSON state command. The controller validates it; the latest state is read back after acknowledgment.'),label('Command',value),button('Apply',async()=>{try{const command=JSON.parse(value.value);if(!command||Array.isArray(command)||typeof command!=='object')throw new Error('Enter a JSON object');await send(command,'Command acknowledged',undefined,false);closeSheet();}catch(error){showError(error);}},'primary'));}
 ui('info-button').onclick=()=>{const body=openSheet('About this controller'),info=model.info;if(!info){body.append(note('Controller information is unavailable while offline.'));return;}const dl=node('dl');for(const [title,value] of [['Name',info.name],['Firmware',info.ver],['Build',info.vid],['Architecture',info.arch],['LEDs',info.canvas?.physicalCount||info.leds?.count],['Uptime',`${Math.floor((info.uptime||0)/60)} min`],['Free heap',`${info.freeheap??'—'} bytes`],['Wi-Fi',`${info.wifi?.signal??'—'}%`],['IP',info.ip||location.hostname],['MAC',info.mac],['FPS',info.leds?.fps??info.fps]]){dl.append(node('dt',title),node('dd',String(value??'—')));}body.append(dl,note(info.simulated?'This is a local simulator. No hardware is connected.':'Scene frames are controller readback; visual brightness can be boosted in this browser.'));};
 // Draw bounded L1/L2 data, saved geometry and sampled paths. Realtime ownership hides stale scene frames.
