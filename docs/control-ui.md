@@ -166,6 +166,40 @@ zero. No firmware was uploaded. The compressed control page is 35,456 bytes.
 Asset generation, all 19 existing Node tests and ESP32/Office C3 compilation
 passed after the final source changes.
 
+## macOS System Settings reference pass
+
+The next refinement directly compares the interface with Steven's six supplied
+macOS System Settings screenshots: Wi-Fi, Network, Appearance, Wallpaper and
+two wallpaper gallery views. Graphite reading planes, thin separators and
+saturated blue current-state accents translate their design into the existing
+WLED window. Power and Save use blue primary fills; actual selected strips,
+presets, color slots and effect/palette thumbnails carry consistent blue cues.
+Controller-derived previews retain their original colors.
+
+Settings uses one rounded container per category, flat rows inside it and an
+original colored category icon. An inset keyboard outline remains visible
+inside the clipping boundary. All twelve native destinations plus JSON and
+Classic retain their original handlers and Back focus/scroll bookmarks. This
+pass adds no appearance preferences or wallpaper controls.
+
+Three independent reviews passed. All 48 interaction assertions passed,
+including every Settings destination and Back bookmark, keyboard navigation,
+actual selected IDs and fixed document/scroll/footer bounds at 1080 × 760,
+390 × 844 and 320 × 568. Effect/palette cells have no horizontal overflow.
+Simulator state, presets and fault flags remained identical; no POST requests
+were made. Source review found no unresolved P0/P1/P2 findings. Conditional
+opaque-material declarations were checked without claiming an OS preference
+emulation or Safari run.
+
+Read-only Office review confirmed 220 effects, 72 palettes, live frames and its
+native UI settings form, then restored focus on Back. Complete configuration
+and presets matched a fresh private snapshot afterward; driver errors remained
+zero. The selected effect, palette and secondary colors changed externally
+during the read-only review, so lighting-state equality is not claimed. No
+device writes or firmware upload were performed. The compressed control page is
+35,690 bytes. Asset generation, all 19 existing Node tests and ESP32/Office C3
+compilation passed after the final source changes.
+
 ## Apple-inspired refinement qualification
 
 Three agents independently researched Apple's primary design guidance, reviewed

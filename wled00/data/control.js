@@ -309,12 +309,12 @@ function nativeSheet(title,path) {
 		if((doc.location.pathname==='/'&&path!=='/?native=1')||doc.location.pathname==='/settings'){settingsSheet();return;}
 	}catch(error){showError(new Error('Settings could not be styled; native controls remain available'));}};
 }
-// Group native destinations by task without adding another page or nested surface.
+// Group native destinations into bounded settings lists with original category icons.
 function settingsSheet() {
 	const body=openSheet('Settings',null,{anchor:ui('settings-button'),kind:'settings'});body.classList.add('settings-body');const version=sheetVersion,bookmark=settingsBookmark;
-	for(const [name,indices] of [['Lighting',[0,4,10]],['Connections',[1,2,3]],['System',[5,6,7,8,9,11]]]){const group=node('section',undefined,'settings-group');group.append(node('h3',name));
-		for(const index of indices){const [title,path]=settingsPages[index];if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};nativeSheet(title,path);},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));group.append(item);}
-		if(name==='System')for(const [title,path,action] of [['Advanced JSON command','json',jsonSheet],['Classic WLED controls','/?native=1',()=>nativeSheet('WLED controls','/?native=1')]]){const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};action();},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));group.append(item);}body.append(group);
+	for(const [name,indices,symbol] of [['Lighting',[0,4,10],'light'],['Connections',[1,2,3],'wireless'],['System',[5,6,7,8,9,11],'settings']]){const group=node('section',undefined,'settings-group'),heading=node('h3'),badge=node('span',undefined,'settings-category'),list=node('div',undefined,'settings-list');badge.dataset.category=name;badge.append(icon(symbol));heading.append(badge,node('span',name));group.append(heading,list);
+		for(const index of indices){const [title,path]=settingsPages[index];if(path==='/settings/2D'&&!model.info?.leds?.matrix&&!model.state?.canvas)continue;const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};nativeSheet(title,path);},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));list.append(item);}
+		if(name==='System')for(const [title,path,action] of [['Advanced JSON command','json',jsonSheet],['Classic WLED controls','/?native=1',()=>nativeSheet('WLED controls','/?native=1')]]){const item=button('',()=>{settingsBookmark={scroll:body.scrollTop,path};action();},'menu-row settings-row');item.dataset.path=path;item.append(node('span',title,'item-name'),icon('chevron','chevron'));list.append(item);}body.append(group);
 	}
 	if(bookmark)requestAnimationFrame(()=>{if(!ui('sheet').open||sheetVersion!==version)return;body.scrollTop=bookmark.scroll;[...body.querySelectorAll('[data-path]')].find(item=>item.dataset.path===bookmark.path)?.focus({preventScroll:true});});
 }
